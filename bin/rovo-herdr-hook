@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+#
+# rovo-herdr-hook - bridge Rovo Dev event hooks into Herdr agent state.
+#
+# Rovo invokes configured hook commands with a JSON payload on stdin. This
+# script maps those lifecycle events to `herdr pane report-agent` calls.
+
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./herdr-lib.sh
+source "$SCRIPT_DIR/herdr-lib.sh"
+
+require_jq >/dev/null 2>&1 || exit 0
+
+payload="$(cat 2>/dev/null || true)"
+[ -n "$payload" ] || exit 0
+
+event_name="$(printf '%s' "$payload" | jq -r '.hook_event_name // empty' 2>/dev/null || true)"
+session_id="$(printf '%s' "$payload" | jq -r '.session_id // empty' 2>/dev/null || true)"
+cwd="$(printf '%s' "$payload" | jq -r '.cwd // empty' 2>/dev/null || true)"
+tool_name="$(printf '%s' "$payload" \
+  | jq -r '
+      .attributes.tool_input.tool_name
+      // .attributes.tool_calls[0].tool_name
+      // .attributes.tool_results[0].tool_name
+      // empty
+    ' 2>/dev/null || true)"
+
+pane_id="$(resolve_rovo_hook_pane "$cwd" 2>/dev/null || true)"
+[ -n "$pane_id" ] || exit 0
+
+state="unknown"
+custom_status=""
+message=""
+
+case "$event_name" in
+  on_session_start)
+    state="idle"
+    custom_status="session"
+    message="Rovo Dev session started"
+    ;;
+  on_user_prompt)
+    state="working"
+    custom_status="prompt"
+    message="Rovo Dev received a prompt"
+    ;;
+  on_tool_start)
+    state="working"
+    custom_status="$(short_status "tool:${tool_name:-running}")"
+    message="Rovo Dev started ${tool_name:-a tool}"
+    ;;
+  on_tool_permission)
+    state="blocked"
+    custom_status="$(short_status "permission:${tool_name:-tool}")"
+    message="Rovo Dev is waiting for permission"
+    ;;
+  on_tool_end)
+    state="working"
+    custom_status="$(short_status "tool-done:${tool_name:-tool}")"
+    message="Rovo Dev finished ${tool_name:-a tool}"
+    ;;
+  on_complete)
+    state="idle"
+    custom_status="done"
+    message="Rovo Dev completed"
+    ;;
+  on_error)
+    state="blocked"
+    custom_status="error"
+    message="Rovo Dev hit an error"
+    ;;
+  on_session_end)
+    state="idle"
+    custom_status="exited"
+    message="Rovo Dev session ended"
+    ;;
+  *)
+    state="unknown"
+    custom_status="$(short_status "$event_name")"
+    message="Rovo Dev event: $event_name"
+    ;;
+esac
+
+report_agent "$pane_id" "$state" "$custom_status" "$session_id" "$message" || true
+exit 0

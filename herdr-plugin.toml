@@ -19,7 +19,16 @@ platforms = ["macos", "linux"]
 command = ["bash", "bin/check-deps"]
 
 [[build]]
-command = ["chmod", "+x", "bin/scan-rovo-panes", "bin/herdr-lib.sh", "bin/check-deps"]
+command = [
+  "chmod",
+  "+x",
+  "bin/scan-rovo-panes",
+  "bin/rovo-herdr-hook",
+  "bin/install-rovo-hooks",
+  "bin/uninstall-rovo-hooks",
+  "bin/herdr-lib.sh",
+  "bin/check-deps",
+]
 
 # Manual/on-demand scan of all panes for running Rovo Dev sessions.
 [[actions]]
@@ -27,6 +36,18 @@ id = "scan"
 title = "Scan Rovo panes"
 contexts = ["global", "workspace", "pane"]
 command = ["./bin/scan-rovo-panes"]
+
+[[actions]]
+id = "install-hooks"
+title = "Install Rovo event hooks"
+contexts = ["global", "workspace", "pane"]
+command = ["./bin/install-rovo-hooks"]
+
+[[actions]]
+id = "uninstall-hooks"
+title = "Uninstall Rovo event hooks"
+contexts = ["global", "workspace", "pane"]
+command = ["./bin/uninstall-rovo-hooks"]
 
 # Event-driven rescans. Herdr does not emit high-volume output events to
 # plugins, so we rescan on lifecycle changes. Each scan re-reads pane output

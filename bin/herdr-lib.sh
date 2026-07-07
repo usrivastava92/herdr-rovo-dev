@@ -129,10 +129,51 @@ derive_custom_status() {
 # Report a pane as a Rovo agent with the given state and optional custom status.
 report_agent() {
   local pane_id="$1" state="$2" custom_status="$3"
+  local agent_session_id="${4:-}"
+  local message="${5:-}"
+  local seq
+  seq="$(date +%s 2>/dev/null || true)"
   local args=(pane report-agent "$pane_id"
     --source "$ROVO_SOURCE"
     --agent "$ROVO_AGENT"
     --state "$state")
   [ -n "$custom_status" ] && args+=(--custom-status "$custom_status")
+  [ -n "$agent_session_id" ] && args+=(--agent-session-id "$agent_session_id")
+  [ -n "$message" ] && args+=(--message "$message")
+  [ -n "$seq" ] && args+=(--seq "$seq")
   "$(herdr_bin)" "${args[@]}" >/dev/null 2>&1
+}
+
+# Resolve the pane associated with a Rovo hook invocation. Rovo inherits the
+# Herdr pane environment when started inside Herdr, which is the reliable path.
+# The cwd fallback is only for manual tests or unusual launchers.
+resolve_rovo_hook_pane() {
+  local cwd="${1:-}"
+
+  if [ -n "${HERDR_PANE_ID:-}" ]; then
+    printf '%s' "$HERDR_PANE_ID"
+    return 0
+  fi
+
+  if [ -z "$cwd" ]; then
+    return 1
+  fi
+
+  local pane_id pane_json pane_cwd
+  while IFS= read -r pane_id; do
+    [ -n "$pane_id" ] || continue
+    pane_json="$("$(herdr_bin)" pane get "$pane_id" 2>/dev/null)" || continue
+    pane_cwd="$(printf '%s' "$pane_json" \
+      | jq -r '.result.pane.foreground_cwd // .result.pane.cwd // empty' 2>/dev/null)" || continue
+    if [ "$pane_cwd" = "$cwd" ] && pane_is_rovo "$pane_id"; then
+      printf '%s' "$pane_id"
+      return 0
+    fi
+  done < <(list_pane_ids)
+
+  return 1
+}
+
+short_status() {
+  printf '%s' "$1" | tr '\n' ' ' | cut -c 1-80
 }

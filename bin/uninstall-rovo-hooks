@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+#
+# uninstall-rovo-hooks - remove the Herdr bridge from Rovo Dev's event hooks.
+
+set -euo pipefail
+
+HOOK_MARKER="rovo-herdr-hook"
+YQ_BIN=""
+
+config_file() {
+  if [ -n "${ROVO_DEV_CONFIG_FILE:-}" ]; then
+    printf '%s' "$ROVO_DEV_CONFIG_FILE"
+  elif [ -n "${ROVODEV_USER_DIR:-}" ]; then
+    printf '%s/config.yml' "${ROVODEV_USER_DIR%/}"
+  else
+    printf '%s/.rovodev/config.yml' "$HOME"
+  fi
+}
+
+if command -v yq >/dev/null 2>&1; then
+  YQ_BIN="$(command -v yq)"
+else
+  for candidate in /opt/homebrew/bin/yq /usr/local/bin/yq; do
+    if [ -x "$candidate" ]; then
+      YQ_BIN="$candidate"
+      break
+    fi
+  done
+fi
+
+if [ -z "$YQ_BIN" ]; then
+  echo "herdr-rovo-dev: yq is required to uninstall Rovo hooks" >&2
+  exit 1
+fi
+
+config="$(config_file)"
+if [ ! -f "$config" ]; then
+  echo "herdr-rovo-dev: Rovo Dev config not found: $config" >&2
+  exit 1
+fi
+
+backup="${config}.before-herdr-rovo-dev-uninstall.$(date +%Y%m%d%H%M%S)"
+cp -p "$config" "$backup"
+
+MARKER="$HOOK_MARKER" "$YQ_BIN" -i \
+  '(.eventHooks.events[].commands) |= ((. // []) | map(select(((.command // "") | contains(strenv(MARKER))) | not)))' \
+  "$config"
+
+echo "Removed Herdr Rovo hooks from $config"
+echo "Backup: $backup"

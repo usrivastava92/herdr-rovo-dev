@@ -14,6 +14,13 @@ Herdr can track terminal AI-agent sessions and show their live state (working, b
 
 This plugin uses Herdr's `pane report-agent` API to surface Rovo Dev sessions.
 
+It has two reporting paths:
+
+1. **Rovo event hooks** for lifecycle state changes such as prompt submitted,
+   tool permission requested, tool started, run completed, and session ended.
+2. **Pane scanning** as a fallback for already-running panes or sessions where
+   hooks have not been installed yet.
+
 On each scan it:
 
 1. Lists panes and inspects the foreground process of each one.
@@ -76,6 +83,24 @@ You can also trigger a scan manually:
 herdr plugin action invoke scan --plugin rovo-dev.detector
 ```
 
+For more accurate state transitions and notifications, install the Rovo event
+hooks:
+
+```sh
+herdr plugin action invoke install-hooks --plugin rovo-dev.detector
+```
+
+This updates `~/.rovodev/config.yml` (or `ROVO_DEV_CONFIG_FILE` /
+`ROVODEV_USER_DIR`) and creates a timestamped backup next to the config file.
+It preserves existing hook commands and only removes/replaces previous commands
+that contain `rovo-herdr-hook`.
+
+To remove the bridge hooks:
+
+```sh
+herdr plugin action invoke uninstall-hooks --plugin rovo-dev.detector
+```
+
 Then confirm:
 
 ```sh
@@ -109,11 +134,12 @@ You can also run the scanner directly from a Herdr pane:
 - Detection is **event-driven**. State only refreshes when one of the subscribed
   lifecycle events fires (or on a manual scan), so a session that transitions
   from working to blocked without any pane event may show a stale state until the
-  next event. For continuous updates, a long-running watcher using the Herdr
-  socket `events.subscribe` API can be layered on top.
+  next event if Rovo hooks are not installed.
+- Rovo hook changes are loaded when Rovo Dev reads its config. Restart existing
+  Rovo Dev sessions after installing hooks so they pick up the new commands.
 - State classification is heuristic and based on Rovo's current TUI output. If
   Rovo's interface text changes, the patterns in `bin/herdr-lib.sh`
-  (`classify_state`) may need updating.
+  (`classify_state`) may need updating for scan fallback behavior.
 - No durable Rovo session id/path is reported yet; if Rovo exposes one, it can be
   passed via `--agent-session-id` / `--agent-session-path`.
 
@@ -124,6 +150,9 @@ herdr-rovo-dev/
   herdr-plugin.toml   manifest: actions + event hooks
   bin/
     scan-rovo-panes   main scanner
+    rovo-herdr-hook    Rovo event hook bridge
+    install-rovo-hooks installs bridge commands into Rovo config
+    uninstall-rovo-hooks removes bridge commands from Rovo config
     herdr-lib.sh      shared helpers (detection, classification, reporting)
     check-deps        install-time dependency preflight
   LICENSE

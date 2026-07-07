@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+#
+# install-rovo-hooks - add the Herdr bridge to Rovo Dev's event hooks.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HOOK_CMD="$SCRIPT_DIR/rovo-herdr-hook"
+HOOK_MARKER="rovo-herdr-hook"
+YQ_BIN=""
+EVENTS=(
+  on_session_start
+  on_user_prompt
+  on_tool_start
+  on_tool_permission
+  on_tool_end
+  on_complete
+  on_error
+  on_session_end
+)
+
+config_file() {
+  if [ -n "${ROVO_DEV_CONFIG_FILE:-}" ]; then
+    printf '%s' "$ROVO_DEV_CONFIG_FILE"
+  elif [ -n "${ROVODEV_USER_DIR:-}" ]; then
+    printf '%s/config.yml' "${ROVODEV_USER_DIR%/}"
+  else
+    printf '%s/.rovodev/config.yml' "$HOME"
+  fi
+}
+
+require_yq() {
+  if command -v yq >/dev/null 2>&1; then
+    YQ_BIN="$(command -v yq)"
+    return 0
+  fi
+
+  local candidate
+  for candidate in /opt/homebrew/bin/yq /usr/local/bin/yq; do
+    if [ -x "$candidate" ]; then
+      YQ_BIN="$candidate"
+      return 0
+    fi
+  done
+
+  if [ -z "$YQ_BIN" ]; then
+    echo "herdr-rovo-dev: yq is required to install Rovo hooks" >&2
+    echo "Install it with: brew install yq" >&2
+    return 1
+  fi
+}
+
+ensure_event() {
+  local event="$1" config="$2"
+  if ! EVENT="$event" "$YQ_BIN" '.eventHooks.events[] | select(.name == strenv(EVENT)) | .name' "$config" \
+    | grep -qx "$event"; then
+    EVENT="$event" "$YQ_BIN" -i '.eventHooks.events += [{"name": strenv(EVENT), "commands": []}]' "$config"
+  fi
+}
+
+install_for_event() {
+  local event="$1" config="$2"
+  ensure_event "$event" "$config"
+  EVENT="$event" CMD="$HOOK_CMD" "$YQ_BIN" -i \
+    '(.eventHooks.events[] | select(.name == strenv(EVENT)).commands) += [{"command": strenv(CMD)}]' \
+    "$config"
+}
+
+main() {
+  require_yq
+
+  local config
+  config="$(config_file)"
+  if [ ! -f "$config" ]; then
+    echo "herdr-rovo-dev: Rovo Dev config not found: $config" >&2
+    exit 1
+  fi
+
+  local backup="${config}.before-herdr-rovo-dev.$(date +%Y%m%d%H%M%S)"
+  cp -p "$config" "$backup"
+
+  "$YQ_BIN" -i '.eventHooks = (.eventHooks // {}) | .eventHooks.events = (.eventHooks.events // [])' "$config"
+
+  MARKER="$HOOK_MARKER" "$YQ_BIN" -i \
+    '(.eventHooks.events[].commands) |= ((. // []) | map(select(((.command // "") | contains(strenv(MARKER))) | not)))' \
+    "$config"
+
+  local event
+  for event in "${EVENTS[@]}"; do
+    install_for_event "$event" "$config"
+  done
+
+  echo "Installed Herdr Rovo hooks into $config"
+  echo "Backup: $backup"
+}
+
+main "$@"
