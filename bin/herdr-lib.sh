@@ -55,7 +55,13 @@ pane_foreground_cmdlines() {
     | jq -r '
         (.result.process_info // .process_info) as $pi
         | $pi.foreground_processes[]?
-        | (.cmdline // (.argv | join(" ")) // .argv0 // empty)
+        | if ((.cmdline // "") != "") then
+            .cmdline
+          elif (((.argv // []) | length) > 0) then
+            (.argv | join(" "))
+          else
+            (.argv0 // empty)
+          end
       '
 }
 
