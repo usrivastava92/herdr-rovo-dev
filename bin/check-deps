@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+#
+# check-deps - install-time preflight for the Rovo Dev Herdr detector.
+#
+# Herdr ships no bundled runtime; a plugin's command is exec'd directly on the
+# host, so every dependency must already exist there. This runs as the manifest
+# [[build]] step so a missing tool fails the *install* with a clear message
+# instead of failing mysteriously on the first scan.
+
+set -u
+
+# Required host tools. bash/grep/sed are effectively ubiquitous on macOS/Linux;
+# jq is the one genuinely-optional package a user may not have.
+REQUIRED=(bash jq grep sed)
+
+missing=()
+for tool in "${REQUIRED[@]}"; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    missing+=("$tool")
+  fi
+done
+
+if [ "${#missing[@]}" -gt 0 ]; then
+  {
+    echo "herdr-rovo-dev: cannot install - missing required tool(s): ${missing[*]}"
+    echo
+    echo "This plugin runs as shell scripts and needs these on PATH:"
+    echo "  bash, jq, grep, sed"
+    echo
+    echo "Install the missing tool(s), e.g.:"
+    echo "  macOS:  brew install jq"
+    echo "  Debian: sudo apt-get install -y jq"
+    echo "  Fedora: sudo dnf install -y jq"
+    echo
+    echo "Then re-run: herdr plugin install <owner>/herdr-rovo-dev"
+  } >&2
+  exit 1
+fi
+
+echo "herdr-rovo-dev: dependency check passed (${REQUIRED[*]})"
+exit 0
