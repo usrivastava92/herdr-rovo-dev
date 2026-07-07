@@ -1,0 +1,12 @@
+# Herdr runtime artifacts (sockets, logs, session state) should never be committed.
+*.sock
+*.log
+session.json
+
+# Plugin state written at runtime.
+tracked-panes
+state/
+
+# Local scratch / temp files.
+tmp_*
+.DS_Store

@@ -1,0 +1,53 @@
+id = "rovo-dev.detector"
+name = "Rovo Dev Detector"
+version = "1.0.0"
+min_herdr_version = "0.7.0"
+description = "Detect Rovo Dev CLI panes and report them as Herdr agents"
+# Portable across any platform with a POSIX shell + coreutils (bash, jq, grep,
+# sed). That covers macOS and Linux; on Windows it works under WSL/Git Bash.
+# Detection uses `herdr pane process-info` output rather than OS-specific tools,
+# so there is nothing macOS- or Linux-specific in the logic.
+platforms = ["macos", "linux"]
+
+# Runs at install time (after a fresh clone), in order.
+# 1. Preflight required host tools so a missing dependency fails the install
+#    with a clear message instead of failing mysteriously on the first scan.
+#    Invoked via `bash` so it does not depend on the exec bit (which Git may
+#    not preserve) - this must be able to run before the chmod step.
+# 2. Make scripts runnable for the actual actions/events.
+[[build]]
+command = ["bash", "bin/check-deps"]
+
+[[build]]
+command = ["chmod", "+x", "bin/scan-rovo-panes", "bin/herdr-lib.sh", "bin/check-deps"]
+
+# Manual/on-demand scan of all panes for running Rovo Dev sessions.
+[[actions]]
+id = "scan"
+title = "Scan Rovo panes"
+contexts = ["global", "workspace", "pane"]
+command = ["./bin/scan-rovo-panes"]
+
+# Event-driven rescans. Herdr does not emit high-volume output events to
+# plugins, so we rescan on lifecycle changes. Each scan re-reads pane output
+# and re-classifies state, which also picks up working<->idle<->blocked
+# transitions whenever any of these events fire.
+[[events]]
+on = "pane.created"
+command = ["./bin/scan-rovo-panes"]
+
+[[events]]
+on = "pane.focused"
+command = ["./bin/scan-rovo-panes"]
+
+[[events]]
+on = "pane.moved"
+command = ["./bin/scan-rovo-panes"]
+
+[[events]]
+on = "pane.exited"
+command = ["./bin/scan-rovo-panes"]
+
+[[events]]
+on = "tab.created"
+command = ["./bin/scan-rovo-panes"]
