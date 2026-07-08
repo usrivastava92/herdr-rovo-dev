@@ -1,0 +1,53 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check shell syntax
+        run: |
+          bash -n \
+            .github/scripts/set-version \
+            bin/check-deps \
+            bin/herdr-lib.sh \
+            bin/install-rovo-hooks \
+            bin/rovo-herdr-hook \
+            bin/scan-rovo-panes \
+            bin/uninstall-rovo-hooks
+
+      - name: Install release tooling
+        run: |
+          npm install --global \
+            semantic-release@25 \
+            @semantic-release/commit-analyzer@13 \
+            @semantic-release/exec@7 \
+            @semantic-release/git@10 \
+            @semantic-release/github@12 \
+            @semantic-release/release-notes-generator@14
+
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: semantic-release

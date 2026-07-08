@@ -64,6 +64,15 @@ docs: document install-from-GitHub flow
 Breaking changes: add a `!` after the type (e.g. `feat!:`) or a `BREAKING CHANGE:`
 footer.
 
+## Releases
+
+Releases happen directly from `main` with semantic-release.
+Every push to `main` analyzes commits since the last `vX.Y.Z` tag, chooses the next SemVer version from Conventional Commits, updates `herdr-plugin.toml`, creates a GitHub release, and pushes the release tag.
+There is no release PR.
+The release workflow reads `RELEASE_TOKEN` from the `production` GitHub Actions environment secret, falling back to `GITHUB_TOKEN` if that secret is not present.
+Keep the `production` environment free of required reviewers and wait timers so releases do not pause.
+Do not create release tags manually except when repairing a broken release.
+
 ## State classification
 
 State heuristics live in `bin/herdr-lib.sh` (`classify_state`). They match Rovo

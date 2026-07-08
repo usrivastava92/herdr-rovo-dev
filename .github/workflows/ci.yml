@@ -1,0 +1,27 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  shell-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check shell syntax
+        run: |
+          bash -n \
+            .github/scripts/set-version \
+            bin/check-deps \
+            bin/herdr-lib.sh \
+            bin/install-rovo-hooks \
+            bin/rovo-herdr-hook \
+            bin/scan-rovo-panes \
+            bin/uninstall-rovo-hooks
