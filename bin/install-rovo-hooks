@@ -1,12 +1,32 @@
 #!/usr/bin/env bash
 #
 # install-rovo-hooks - add the Herdr bridge to Rovo Dev's event hooks.
+#
+# Runs in two modes:
+#   manual (default): invoked on-demand via the "Install Rovo event hooks"
+#                      action. Missing prerequisites (yq, Rovo config) are
+#                      hard errors (exit 1) since the user explicitly asked
+#                      for this to happen.
+#   --auto:            invoked automatically as a [[build]] step right after
+#                      the plugin is installed. Missing prerequisites are NOT
+#                      fatal here - yq is an optional dependency (unlike
+#                      bash/jq/grep/sed) and the Rovo config may not exist yet
+#                      if Rovo hasn't been run once on this machine. In that
+#                      case we skip quietly (exit 0) so plugin install still
+#                      succeeds, and tell the user how to install hooks later
+#                      via the manual action once the prerequisite is met.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./herdr-lib.sh
 source "$SCRIPT_DIR/herdr-lib.sh"
+
+AUTO=0
+if [ "${1:-}" = "--auto" ]; then
+  AUTO=1
+  shift
+fi
 
 HOOK_CMD="$SCRIPT_DIR/rovo-herdr-hook"
 HOOK_MARKER="rovo-herdr-hook"
@@ -29,6 +49,21 @@ config_file() {
   rovo_config_file
 }
 
+# Report a missing prerequisite. In manual mode this is a hard error (exit
+# 1); in --auto mode it is a quiet, non-fatal skip (exit 0) so plugin install
+# still succeeds - the user can install hooks later via the manual action.
+skip_or_fail() {
+  if [ "$AUTO" -eq 1 ]; then
+    printf 'herdr-rovo-dev: %s\n' "$1"
+    echo "herdr-rovo-dev: skipping automatic Rovo hook install for now."
+    echo "herdr-rovo-dev: run the \"Install Rovo event hooks\" action any time to enable it once ready."
+    exit 0
+  else
+    printf 'herdr-rovo-dev: %s\n' "$1" >&2
+    exit 1
+  fi
+}
+
 require_yq() {
   if command -v yq >/dev/null 2>&1; then
     YQ_BIN="$(command -v yq)"
@@ -43,11 +78,7 @@ require_yq() {
     fi
   done
 
-  if [ -z "$YQ_BIN" ]; then
-    echo "herdr-rovo-dev: yq is required to install Rovo hooks" >&2
-    echo "Install it with: brew install yq" >&2
-    return 1
-  fi
+  return 1
 }
 
 ensure_event() {
@@ -67,13 +98,14 @@ install_for_event() {
 }
 
 main() {
-  require_yq
+  if ! require_yq; then
+    skip_or_fail "yq is required to install Rovo hooks (install it with: brew install yq)"
+  fi
 
   local config
   config="$(config_file)"
   if [ ! -f "$config" ]; then
-    echo "herdr-rovo-dev: Rovo Dev config not found: $config" >&2
-    exit 1
+    skip_or_fail "Rovo config not found: $config"
   fi
 
   local backup="${config}.before-herdr-rovo-dev.$(date +%Y%m%d%H%M%S)"
@@ -92,6 +124,7 @@ main() {
 
   echo "Installed Herdr Rovo hooks into $config"
   echo "Backup: $backup"
+  echo "Restart any running Rovo CLI / Rovo Dev CLI sessions to pick up the new hooks."
 }
 
 main "$@"
