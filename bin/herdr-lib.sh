@@ -71,7 +71,9 @@ pane_foreground_cmdlines() {
 #   Rovo Dev CLI (legacy): `acli rovodev run`, `atlassian_cli_rovodev run`
 #   Rovo CLI (new):        `rovo` (bare TUI launch; the `rovo` launcher execs a
 #                          binary that may itself be named `rovo` or
-#                          `atlassian_cli_rovodev`), also `rovo run`.
+#                          `atlassian_cli_rovodev`), also `rovo run`, and
+#                          `rovo --restore <session-id>` (reattaching a prior
+#                          session) or other flags/args.
 #
 # Non-interactive `serve` sessions (e.g. the IDE-embedded
 # `atlassian_cli_rovodev serve ...`) are deliberately NOT matched - they are not
@@ -82,10 +84,17 @@ pane_is_rovo() {
   cmds="$(pane_foreground_cmdlines "$pane_id")" || return 1
 
   # Exclude non-interactive serve mode outright, then match either CLI.
+  #
+  # The positive match only requires the "rovo"/"... run" token to be
+  # followed by whitespace-or-end (rather than anchoring the whole command to
+  # the end of the line), so trailing flags/args - e.g. `rovo --restore
+  # <session-id>` when reattaching a session - do not prevent detection.
+  # Without this, such panes are treated as "no longer Rovo" and get
+  # force-reset to idle on every scan, regardless of their actual state.
   printf '%s\n' "$cmds" \
-    | grep -Ev '(atlassian_cli_rovodev|acli[[:space:]]+rovodev|rovo)[[:space:]]+serve' \
+    | grep -Ev '(atlassian_cli_rovodev|acli[[:space:]]+rovodev|(^|/|[[:space:]])rovo)[[:space:]]+serve([[:space:]]|$)' \
     | grep -Eq \
-      '(^|/|[[:space:]])rovo([[:space:]]+run)?[[:space:]]*$|(atlassian_cli_rovodev[[:space:]]+run)|(acli[[:space:]]+rovodev[[:space:]]+run)'
+      '(^|/|[[:space:]])rovo([[:space:]]+run)?([[:space:]]|$)|(atlassian_cli_rovodev[[:space:]]+run)|(acli[[:space:]]+rovodev[[:space:]]+run)'
 }
 
 # Classify the semantic state of a Rovo pane from its recent visible output.
@@ -100,8 +109,19 @@ classify_state() {
   }
 
   # Working: Rovo is actively thinking or executing a tool call.
+  #
+  # NOTE: the new Rovo CLI dropped "Dev" from its status wording (it now
+  # prints "Rovo is thinking.." rather than "Rovo Dev is thinking"), and
+  # replaced the old "Esc to interrupt" hint with a
+  # "Enter to queue, Ctrl+Enter to steer" input box while a run is in
+  # flight. The "Dev" branding is matched optionally so this keeps working
+  # for the legacy Rovo Dev CLI too. Without this, the working-state check
+  # never matches on the new CLI and every session falls through to the
+  # idle-state check below, which matches the "? for shortcuts" footer that
+  # is *always* visible regardless of whether Rovo is actively working -
+  # causing working sessions to be misreported as idle.
   if printf '%s' "$out" | grep -Eq \
-    'Rovo Dev is (thinking|working|running)|(Esc to interrupt)|(▶[^|]+\|[[:space:]]*[a-z_]+[[:space:]]*$)'; then
+    'Rovo( Dev)? is (thinking|working|running)|(Esc to interrupt)|(Enter to queue,? Ctrl\+Enter to steer)|(▶[^|]+\|[[:space:]]*[a-z_]+[[:space:]]*$)'; then
     printf 'working'
     return 0
   fi
