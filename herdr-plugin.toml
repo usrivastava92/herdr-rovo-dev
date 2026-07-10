@@ -15,6 +15,7 @@ platforms = ["macos", "linux"]
 #    Invoked via `bash` so it does not depend on the exec bit (which Git may
 #    not preserve) - this must be able to run before the chmod step.
 # 2. Make scripts runnable for the actual actions/events.
+# 3. Best-effort automatic hook install (see comment below).
 [[build]]
 command = ["bash", "bin/check-deps"]
 
@@ -30,6 +31,18 @@ command = [
   "bin/check-deps",
 ]
 
+# 3. Best-effort automatic hook install so status updates are event-driven
+#    (instant, accurate) out of the box, without requiring a separate manual
+#    step. This is intentionally non-fatal: yq is an optional dependency (not
+#    checked by check-deps) and the Rovo config may not exist yet if Rovo
+#    hasn't been run once on this machine - in either case install-rovo-hooks
+#    --auto skips quietly and plugin install still succeeds. The "install
+#    Rovo event hooks" action below remains available to (re)run this
+#    manually at any time, e.g. after installing yq, running Rovo for the
+#    first time, or resetting the Rovo config.
+[[build]]
+command = ["bash", "bin/install-rovo-hooks", "--auto"]
+
 # Manual/on-demand scan of all panes for running Rovo CLI / Rovo Dev CLI sessions.
 [[actions]]
 id = "scan"
@@ -39,7 +52,7 @@ command = ["./bin/scan-rovo-panes"]
 
 [[actions]]
 id = "install-hooks"
-title = "Install Rovo event hooks"
+title = "(Re)install Rovo event hooks"
 contexts = ["global", "workspace", "pane"]
 command = ["./bin/install-rovo-hooks"]
 

@@ -69,6 +69,15 @@ On install Herdr clones the repo, validates `herdr-plugin.toml`, and runs the
    directly on the host, so a missing tool fails the **install** with a clear
    message (and install hint) instead of failing mysteriously on the first scan.
 2. `chmod +x` on the scripts, since Git does not always preserve the exec bit.
+3. `bin/install-rovo-hooks --auto` - best-effort automatic hook install, so
+   status updates are instant and event-driven out of the box without a
+   separate manual step. This step is **not** allowed to fail the install:
+   `yq` is an optional dependency (unlike `bash`/`jq`/`grep`/`sed` above) and
+   the Rovo config may not exist yet if Rovo hasn't been run once on this
+   machine, so if either prerequisite is missing it skips quietly instead of
+   erroring. Run the `install-hooks` action manually any time afterwards
+   (e.g. once `yq` is installed, or after running Rovo for the first time) to
+   pick up hooks retroactively - see [Usage](#usage).
 
 The scanner also re-checks for `jq` at runtime as a second line of defense.
 
@@ -89,8 +98,16 @@ You can also trigger a scan manually:
 herdr plugin action invoke scan --plugin rovo-dev.detector
 ```
 
-For more accurate state transitions and notifications, install the Rovo event
-hooks:
+Rovo event hooks are installed automatically at plugin-install time (see
+[Install](#install)) whenever `yq` and an existing Rovo config are already
+present, so most users get instant, event-driven status updates with no extra
+step. Any running Rovo sessions from *before* install still need a restart to
+pick up the new hooks (Rovo reads its hook config once at startup), and
+sessions started afterwards get them automatically.
+
+If the automatic install was skipped (missing `yq`, or Rovo hadn't been run
+yet), or you want to re-sync hooks after a config reset, (re)install them
+manually any time:
 
 ```sh
 herdr plugin action invoke install-hooks --plugin rovo-dev.detector
@@ -98,7 +115,7 @@ herdr plugin action invoke install-hooks --plugin rovo-dev.detector
 
 This updates the Rovo config and creates a timestamped backup next to it. It
 preserves existing hook commands and only removes/replaces previous commands
-that contain `rovo-herdr-hook`.
+that contain `rovo-herdr-hook`, so it is safe to run repeatedly.
 
 The config is resolved in this order:
 
