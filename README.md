@@ -4,15 +4,17 @@
 [![Platform: macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue.svg)](#requirements)
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-informational.svg)](https://www.conventionalcommits.org)
 
-A [Herdr](https://herdr.dev) plugin that detects [Rovo Dev CLI](https://www.atlassian.com/software/rovo) sessions and reports them as Herdr agents, so a running `acli rovodev run` pane shows up in Herdr's sidebar `agents` list with a live status dot, just like Codex, Cursor Agent, and Claude Code.
+A [Herdr](https://herdr.dev) plugin that detects [Rovo CLI and Rovo Dev CLI](https://www.atlassian.com/software/rovo) sessions and reports them as Herdr agents, so a running `rovo` (or legacy `acli rovodev run`) pane shows up in Herdr's sidebar `agents` list with a live status dot, just like Codex, Cursor Agent, and Claude Code.
+
+Both CLIs are supported: the new **Rovo CLI** (`rovo`, state in `~/.rovo`) and the legacy **Rovo Dev CLI** (`acli rovodev run`, state in `~/.rovodev`). See [Migrating from Rovo Dev CLI to Rovo CLI](https://hello.atlassian.net/wiki/spaces/CD6/pages/7314164972/Migrating+from+Rovo+Dev+CLI+to+Rovo+CLI).
 
 ## Why
 
-Herdr can track terminal AI-agent sessions and show their live state (working, blocked, idle) in a single dashboard, but it has no built-in Rovo Dev integration, so Rovo panes are invisible to the `agents` list. This plugin closes that gap: it spots panes running Rovo Dev, infers what the session is doing, and reports it back to Herdr, entirely through Herdr's public plugin and CLI APIs.
+Herdr can track terminal AI-agent sessions and show their live state (working, blocked, idle) in a single dashboard, but it has no built-in Rovo integration, so Rovo panes are invisible to the `agents` list. This plugin closes that gap: it spots panes running the Rovo CLI or Rovo Dev CLI, infers what the session is doing, and reports it back to Herdr, entirely through Herdr's public plugin and CLI APIs.
 
 ## What it does
 
-This plugin uses Herdr's `pane report-agent` API to surface Rovo Dev sessions.
+This plugin uses Herdr's `pane report-agent` API to surface Rovo CLI and Rovo Dev CLI sessions.
 
 It has two reporting paths:
 
@@ -24,7 +26,7 @@ It has two reporting paths:
 On each scan it:
 
 1. Lists panes and inspects the foreground process of each one.
-2. Detects Rovo when the foreground command is `atlassian_cli_rovodev run` or `acli rovodev run`.
+2. Detects Rovo when the foreground command is `rovo` (new Rovo CLI) or `acli rovodev run` / `atlassian_cli_rovodev run` (legacy Rovo Dev CLI). Non-interactive `serve` sessions (e.g. the IDE-embedded `atlassian_cli_rovodev serve`) are ignored.
 3. Reads recent pane output and classifies the session state.
 4. Reports the pane as the `rovo-dev` agent with that state.
 5. Resets any previously-detected pane to `idle` once Rovo is gone (e.g. it exited).
@@ -90,10 +92,24 @@ hooks:
 herdr plugin action invoke install-hooks --plugin rovo-dev.detector
 ```
 
-This updates `~/.rovodev/config.yml` (or `ROVO_DEV_CONFIG_FILE` /
-`ROVODEV_USER_DIR`) and creates a timestamped backup next to the config file.
-It preserves existing hook commands and only removes/replaces previous commands
+This updates the Rovo config and creates a timestamped backup next to it. It
+preserves existing hook commands and only removes/replaces previous commands
 that contain `rovo-herdr-hook`.
+
+The config is resolved in this order:
+
+1. `ROVO_DEV_CONFIG_FILE` - an explicit full path to a `config.yml`.
+2. `ROVO_USER_DIR` / `ROVODEV_USER_DIR` - an explicit state dir; uses its `config.yml`.
+3. `~/.rovo/config.yml` (new Rovo CLI) if it exists.
+4. `~/.rovodev/config.yml` (legacy Rovo Dev CLI) if it exists.
+5. `~/.rovo/config.yml` as the default target when neither exists yet.
+
+If you run both CLIs and want hooks in both, install once per config, e.g.:
+
+```sh
+ROVO_DEV_CONFIG_FILE=~/.rovo/config.yml    herdr plugin action invoke install-hooks --plugin rovo-dev.detector
+ROVO_DEV_CONFIG_FILE=~/.rovodev/config.yml herdr plugin action invoke install-hooks --plugin rovo-dev.detector
+```
 
 To remove the bridge hooks:
 
@@ -135,8 +151,9 @@ You can also run the scanner directly from a Herdr pane:
   lifecycle events fires (or on a manual scan), so a session that transitions
   from working to blocked without any pane event may show a stale state until the
   next event if Rovo hooks are not installed.
-- Rovo hook changes are loaded when Rovo Dev reads its config. Restart existing
-  Rovo Dev sessions after installing hooks so they pick up the new commands.
+- Rovo hook changes are loaded when the CLI reads its config. Restart existing
+  Rovo CLI / Rovo Dev CLI sessions after installing hooks so they pick up the
+  new commands.
 - State classification is heuristic and based on Rovo's current TUI output. If
   Rovo's interface text changes, the patterns in `bin/herdr-lib.sh`
   (`classify_state`) may need updating for scan fallback behavior.
@@ -165,7 +182,8 @@ herdr-rovo-dev/
 - Herdr plugins: https://herdr.dev/docs/plugins/
 - Herdr CLI reference: https://herdr.dev/docs/cli-reference/
 - Herdr socket API: https://herdr.dev/docs/socket-api/
-- Rovo Dev CLI: https://www.atlassian.com/software/rovo
+- Rovo CLI / Rovo Dev CLI: https://www.atlassian.com/software/rovo
+- Migrating from Rovo Dev CLI to Rovo CLI: https://hello.atlassian.net/wiki/spaces/CD6/pages/7314164972/Migrating+from+Rovo+Dev+CLI+to+Rovo+CLI
 
 ## Contributing
 

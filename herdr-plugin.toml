@@ -1,8 +1,8 @@
 id = "rovo-dev.detector"
 name = "Rovo Dev Detector"
-version = "1.1.0"
+version = "1.2.0"
 min_herdr_version = "0.7.0"
-description = "Detect Rovo Dev CLI panes and report them as Herdr agents"
+description = "Detect Rovo CLI and Rovo Dev CLI panes and report them as Herdr agents"
 # Portable across any platform with a POSIX shell + coreutils (bash, jq, grep,
 # sed). That covers macOS and Linux; on Windows it works under WSL/Git Bash.
 # Detection uses `herdr pane process-info` output rather than OS-specific tools,
@@ -30,7 +30,7 @@ command = [
   "bin/check-deps",
 ]
 
-# Manual/on-demand scan of all panes for running Rovo Dev sessions.
+# Manual/on-demand scan of all panes for running Rovo CLI / Rovo Dev CLI sessions.
 [[actions]]
 id = "scan"
 title = "Scan Rovo panes"

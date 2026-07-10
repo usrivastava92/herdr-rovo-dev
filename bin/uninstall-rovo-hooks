@@ -4,17 +4,18 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./herdr-lib.sh
+source "$SCRIPT_DIR/herdr-lib.sh"
+
 HOOK_MARKER="rovo-herdr-hook"
 YQ_BIN=""
 
+# Resolve the Rovo config for both the new Rovo CLI (~/.rovo/config.yml) and the
+# legacy Rovo Dev CLI (~/.rovodev/config.yml). See rovo_config_file in
+# herdr-lib.sh for the full resolution order and env overrides.
 config_file() {
-  if [ -n "${ROVO_DEV_CONFIG_FILE:-}" ]; then
-    printf '%s' "$ROVO_DEV_CONFIG_FILE"
-  elif [ -n "${ROVODEV_USER_DIR:-}" ]; then
-    printf '%s/config.yml' "${ROVODEV_USER_DIR%/}"
-  else
-    printf '%s/.rovodev/config.yml' "$HOME"
-  fi
+  rovo_config_file
 }
 
 if command -v yq >/dev/null 2>&1; then
