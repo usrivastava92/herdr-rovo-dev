@@ -32,6 +32,56 @@ tracked_file() {
   printf '%s/tracked-panes' "$(state_dir)"
 }
 
+# --- Hook-priority tracking ------------------------------------------------
+#
+# When Rovo's event hooks (rovo-herdr-hook) are installed and actively firing
+# for a pane, they are a far more reliable source of truth than re-deriving
+# state from scraped terminal output: they carry structured, semantic event
+# names straight from Rovo's own lifecycle, immune to any future wording/UI
+# changes in the CLI. The scan-based fallback (scan-rovo-panes) exists only to
+# (a) bootstrap panes that predate hook installation or whose hooks are not
+# (yet) firing, and (b) detect that Rovo has exited a pane entirely, which
+# hooks cannot self-report if the process dies uncleanly.
+#
+# To avoid the scanner's heuristics fighting with - and potentially
+# clobbering - an already-accurate hook-reported state, each pane that has
+# received at least one hook event is marked "hooked" here. The scanner
+# checks this marker and, once set, trusts the hook layer completely for that
+# pane's state/custom-status, skipping its own regex-based reclassification.
+hooked_dir() {
+  local dir
+  dir="$(state_dir)/hooked"
+  mkdir -p "$dir" 2>/dev/null || true
+  printf '%s' "$dir"
+}
+
+# Filesystem-safe marker filename for a pane id (defensive; pane ids observed
+# in practice are already safe, e.g. "wT:p1", but avoid any path traversal).
+hook_marker_file() {
+  local pane_id="$1"
+  printf '%s/%s' "$(hooked_dir)" "$(printf '%s' "$pane_id" | tr '/' '_')"
+}
+
+# Record that a pane has an actively-firing hook pipeline.
+mark_pane_hooked() {
+  local pane_id="$1"
+  touch "$(hook_marker_file "$pane_id")" 2>/dev/null || true
+}
+
+# Return 0 if the pane has a recorded active hook pipeline.
+pane_hook_active() {
+  local pane_id="$1"
+  [ -e "$(hook_marker_file "$pane_id")" ]
+}
+
+# Forget a pane's hook-active marker (session ended, or Rovo is no longer the
+# foreground process). A pane id can be reused by a later, unrelated session,
+# which should have to re-earn hook trust from its own first event.
+clear_pane_hooked() {
+  local pane_id="$1"
+  rm -f "$(hook_marker_file "$pane_id")" 2>/dev/null || true
+}
+
 # jq must be available for JSON parsing.
 require_jq() {
   if ! command -v jq >/dev/null 2>&1; then

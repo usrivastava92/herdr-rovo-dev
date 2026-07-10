@@ -6,8 +6,15 @@
 # (pane.created/focused/moved/exited, tab.created). For every pane it:
 #
 #   1. checks whether Rovo Dev is the foreground process,
-#   2. if so, classifies state from recent output and reports the agent,
-#   3. if a pane we previously tracked is no longer Rovo, resets it to idle.
+#   2. if Rovo's event hooks are already actively reporting for that pane,
+#      trusts them completely and skips re-deriving state from output (see
+#      pane_hook_active in herdr-lib.sh) - this is a strictly more reliable
+#      signal than screen-scraping, so hooked panes are left alone,
+#   3. otherwise, classifies state from recent output and reports the agent
+#      (the bootstrap path for panes without active hooks yet),
+#   4. if a pane we previously tracked is no longer Rovo, resets it to idle
+#      and forgets its hook marker (hooks cannot self-report a process that
+#      has already exited).
 #
 # Safe to run repeatedly; it is idempotent.
 
@@ -29,11 +36,20 @@ while IFS= read -r pane_id; do
   [ -n "$pane_id" ] || continue
 
   if pane_is_rovo "$pane_id"; then
-    state="$(classify_state "$pane_id")"
-    custom_status="$(derive_custom_status "$pane_id")"
-    if report_agent "$pane_id" "$state" "$custom_status"; then
+    if pane_hook_active "$pane_id"; then
+      # Hooks are actively firing for this pane; they are authoritative and
+      # more reliable than screen-scraping. Leave their last-reported state
+      # untouched and only track the pane so the exit-reset logic below still
+      # applies if Rovo later exits without a clean on_session_end.
       current_rovo+=("$pane_id")
-      echo "reported $pane_id state=$state ${custom_status:+status=$custom_status}"
+      echo "skip $pane_id (hook-active, trusting last hook report)"
+    else
+      state="$(classify_state "$pane_id")"
+      custom_status="$(derive_custom_status "$pane_id")"
+      if report_agent "$pane_id" "$state" "$custom_status"; then
+        current_rovo+=("$pane_id")
+        echo "reported $pane_id state=$state ${custom_status:+status=$custom_status}"
+      fi
     fi
   fi
 done < <(list_pane_ids)
@@ -50,6 +66,7 @@ if [ -s "$TRACKED" ]; then
     if [ "$still" -eq 0 ]; then
       report_agent "$old_pane" "idle" "exited" \
         && echo "reset $old_pane -> idle (exited)"
+      clear_pane_hooked "$old_pane"
     fi
   done < "$TRACKED"
 fi

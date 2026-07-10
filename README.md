@@ -16,20 +16,33 @@ Herdr can track terminal AI-agent sessions and show their live state (working, b
 
 This plugin uses Herdr's `pane report-agent` API to surface Rovo CLI and Rovo Dev CLI sessions.
 
-It has two reporting paths:
+It has two reporting paths, and **hooks always take priority** over scanning
+once they are active for a pane:
 
 1. **Rovo event hooks** for lifecycle state changes such as prompt submitted,
    tool permission requested, tool started, run completed, and session ended.
-2. **Pane scanning** as a fallback for already-running panes or sessions where
-   hooks have not been installed yet.
+   These carry structured, semantic event names straight from Rovo's own
+   lifecycle, so they are immune to any future wording/UI changes in the CLI.
+2. **Pane scanning** as a fallback that only applies to panes with **no active
+   hook pipeline yet** - e.g. already-running panes from before hooks were
+   installed, or sessions where hooks are not (yet) firing for some other
+   reason. It never re-derives or overwrites the state of a pane that hooks
+   are already reporting for, so the two paths cannot fight over the same
+   pane's status.
 
 On each scan it:
 
 1. Lists panes and inspects the foreground process of each one.
 2. Detects Rovo when the foreground command is `rovo` (new Rovo CLI) or `acli rovodev run` / `atlassian_cli_rovodev run` (legacy Rovo Dev CLI). Non-interactive `serve` sessions (e.g. the IDE-embedded `atlassian_cli_rovodev serve`) are ignored.
-3. Reads recent pane output and classifies the session state.
-4. Reports the pane as the `rovo-dev` agent with that state.
-5. Resets any previously-detected pane to `idle` once Rovo is gone (e.g. it exited).
+3. If the pane already has an active hook pipeline (it has received at least
+   one hook event and has not since had a clean `on_session_end`), skips
+   straight to step 5 without touching its state - hooks are trusted as-is.
+4. Otherwise, reads recent pane output and classifies the session state.
+5. Reports/keeps the pane as the `rovo-dev` agent with that state.
+6. Resets any previously-detected pane to `idle` once Rovo is gone (e.g. it
+   exited), and forgets its hook-active marker so a later, unrelated session
+   reusing the same pane id has to re-earn hook trust from its own first
+   event.
 
 ### State classification
 
@@ -168,16 +181,21 @@ You can also run the scanner directly from a Herdr pane:
 
 ## Limitations and future work
 
-- Detection is **event-driven**. State only refreshes when one of the subscribed
-  lifecycle events fires (or on a manual scan), so a session that transitions
-  from working to blocked without any pane event may show a stale state until the
-  next event if Rovo hooks are not installed.
+- Detection is **event-driven** for panes without active hooks. Their state
+  only refreshes when one of the subscribed lifecycle events fires (or on a
+  manual scan), so a session that transitions from working to blocked without
+  any pane event may show a stale state until the next event. Once a pane has
+  an active hook pipeline, this does not apply - hooks push state changes
+  immediately and scanning stops touching that pane's state entirely.
 - Rovo hook changes are loaded when the CLI reads its config. Restart existing
   Rovo CLI / Rovo Dev CLI sessions after installing hooks so they pick up the
-  new commands.
-- State classification is heuristic and based on Rovo's current TUI output. If
-  Rovo's interface text changes, the patterns in `bin/herdr-lib.sh`
-  (`classify_state`) may need updating for scan fallback behavior.
+  new commands. Until restarted, such a session has no active hook pipeline
+  yet and is covered by the scan fallback above.
+- State classification is heuristic and based on Rovo's current TUI output.
+  This only affects the scan fallback for panes without active hooks - it is
+  never used to override an already-hooked pane's state. If Rovo's interface
+  text changes, the patterns in `bin/herdr-lib.sh` (`classify_state`) may need
+  updating for that fallback path.
 - No durable Rovo session id/path is reported yet; if Rovo exposes one, it can be
   passed via `--agent-session-id` / `--agent-session-path`.
 
