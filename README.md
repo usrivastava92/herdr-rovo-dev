@@ -35,12 +35,16 @@ On each scan it:
 
 State is inferred from Rovo's visible output (best-effort heuristics):
 
-| State     | Trigger examples                                                        |
-|-----------|------------------------------------------------------------------------|
-| `working` | "Rovo Dev is thinking", an active tool-call line, "Esc to interrupt"   |
-| `blocked` | `[y/n]` prompts, "Do you want to...", "Waiting for input", approvals   |
-| `idle`    | interactive prompt present (`? for shortcuts`, `agent mode:`) and quiet |
-| `unknown` | nothing recognizable                                                    |
+| State     | Trigger examples                                                                                  |
+|-----------|----------------------------------------------------------------------------------------------------|
+| `working` | "Rovo is thinking" / "Rovo Dev is thinking", an active tool-call line, "Enter to queue, Ctrl+Enter to steer", "Esc to interrupt" |
+| `blocked` | `[y/n]` prompts, "Do you want to...", "Waiting for input", approvals                               |
+| `idle`    | interactive prompt present (`? for shortcuts`, `agent mode:`) and quiet                             |
+| `unknown` | nothing recognizable                                                                                |
+
+Note: the footer `? for shortcuts.` is shown by the Rovo CLI at all times, whether
+or not a run is in flight, so the `working`/`blocked` checks are evaluated first
+and take priority over the `idle` check.
 
 The current Rovo `agent mode:` (e.g. `plan`) is reported as the agent's custom status.
 
