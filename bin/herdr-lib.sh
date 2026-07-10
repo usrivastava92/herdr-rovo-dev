@@ -65,14 +65,27 @@ pane_foreground_cmdlines() {
       '
 }
 
-# Return 0 if the pane is running a Rovo Dev CLI session in the foreground.
-# Matches the acli launcher and the underlying binary, in run mode.
+# Return 0 if the pane is running a Rovo CLI or Rovo Dev CLI session in the
+# foreground. Supports both the legacy Rovo Dev CLI and the new Rovo CLI:
+#
+#   Rovo Dev CLI (legacy): `acli rovodev run`, `atlassian_cli_rovodev run`
+#   Rovo CLI (new):        `rovo` (bare TUI launch; the `rovo` launcher execs a
+#                          binary that may itself be named `rovo` or
+#                          `atlassian_cli_rovodev`), also `rovo run`.
+#
+# Non-interactive `serve` sessions (e.g. the IDE-embedded
+# `atlassian_cli_rovodev serve ...`) are deliberately NOT matched - they are not
+# interactive TUI panes and should not be reported as agents.
 pane_is_rovo() {
   local pane_id="$1"
   local cmds
   cmds="$(pane_foreground_cmdlines "$pane_id")" || return 1
-  printf '%s\n' "$cmds" | grep -Eq \
-    '(atlassian_cli_rovodev[[:space:]]+run)|(acli[[:space:]]+rovodev[[:space:]]+run)'
+
+  # Exclude non-interactive serve mode outright, then match either CLI.
+  printf '%s\n' "$cmds" \
+    | grep -Ev '(atlassian_cli_rovodev|acli[[:space:]]+rovodev|rovo)[[:space:]]+serve' \
+    | grep -Eq \
+      '(^|/|[[:space:]])rovo([[:space:]]+run)?[[:space:]]*$|(atlassian_cli_rovodev[[:space:]]+run)|(acli[[:space:]]+rovodev[[:space:]]+run)'
 }
 
 # Classify the semantic state of a Rovo pane from its recent visible output.
@@ -176,4 +189,41 @@ resolve_rovo_hook_pane() {
 
 short_status() {
   printf '%s' "$1" | tr '\n' ' ' | cut -c 1-80
+}
+
+# Resolve the Rovo config.yml to operate on, supporting both CLIs:
+#
+#   Rovo CLI (new):        ~/.rovo/config.yml
+#   Rovo Dev CLI (legacy): ~/.rovodev/config.yml
+#
+# Resolution order:
+#   1. ROVO_DEV_CONFIG_FILE - explicit full path (either CLI).
+#   2. ROVODEV_USER_DIR / ROVO_USER_DIR - explicit state dir; its config.yml.
+#   3. ~/.rovo/config.yml if it exists (prefer the new CLI).
+#   4. ~/.rovodev/config.yml if it exists (legacy fallback).
+#   5. ~/.rovo/config.yml as the default target when neither exists yet
+#      (so a first-time install lands on the new CLI).
+rovo_config_file() {
+  if [ -n "${ROVO_DEV_CONFIG_FILE:-}" ]; then
+    printf '%s' "$ROVO_DEV_CONFIG_FILE"
+    return 0
+  fi
+  if [ -n "${ROVO_USER_DIR:-}" ]; then
+    printf '%s/config.yml' "${ROVO_USER_DIR%/}"
+    return 0
+  fi
+  if [ -n "${ROVODEV_USER_DIR:-}" ]; then
+    printf '%s/config.yml' "${ROVODEV_USER_DIR%/}"
+    return 0
+  fi
+
+  local new_config="$HOME/.rovo/config.yml"
+  local legacy_config="$HOME/.rovodev/config.yml"
+  if [ -f "$new_config" ]; then
+    printf '%s' "$new_config"
+  elif [ -f "$legacy_config" ]; then
+    printf '%s' "$legacy_config"
+  else
+    printf '%s' "$new_config"
+  fi
 }
