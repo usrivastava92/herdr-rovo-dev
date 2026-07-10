@@ -83,4 +83,16 @@ case "$event_name" in
 esac
 
 report_agent "$pane_id" "$state" "$custom_status" "$session_id" "$message" || true
+
+# Track hook-pipeline liveness for this pane so scan-rovo-panes' scraping
+# fallback defers to these (far more reliable) hook reports instead of
+# re-deriving and potentially clobbering them from screen text. A session end
+# clears the marker so a later, unrelated session reusing the same pane id
+# starts over and has to re-earn hook trust from its own first event.
+if [ "$event_name" = "on_session_end" ]; then
+  clear_pane_hooked "$pane_id"
+else
+  mark_pane_hooked "$pane_id"
+fi
+
 exit 0
