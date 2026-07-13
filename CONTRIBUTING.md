@@ -69,7 +69,9 @@ footer.
 Releases happen directly from `main` with semantic-release.
 Every push to `main` analyzes commits since the last `vX.Y.Z` tag, chooses the next SemVer version from Conventional Commits, updates `herdr-plugin.toml`, creates a GitHub release, and pushes the release tag.
 There is no release PR.
-The release workflow reads `RELEASE_TOKEN` from the `production` GitHub Actions environment secret, falling back to `GITHUB_TOKEN` if that secret is not present.
+The release workflow mints a one-repo contents-write GitHub App token from `APP_CLIENT_ID` and `APP_PRIVATE_KEY`.
+Set `APP_CLIENT_ID` as a `production` environment variable and `APP_PRIVATE_KEY` as a `production` environment secret.
+Releases run unattended and use only the minted token, so there is no PAT fallback.
 Keep the `production` environment free of required reviewers and wait timers so releases do not pause.
 Do not create release tags manually except when repairing a broken release.
 
