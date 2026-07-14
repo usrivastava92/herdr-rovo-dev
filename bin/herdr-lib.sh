@@ -19,10 +19,30 @@ herdr_bin() {
 }
 
 # Directory used to remember which panes we have marked as Rovo agents, so we
-# can reset them to idle once Rovo is no longer the foreground process. Falls
-# back to a temp dir when the plugin state dir is not provided (manual runs).
+# can reset them to idle once Rovo is no longer the foreground process, and to
+# record which panes have an actively-firing hook pipeline (see hooked_dir
+# below).
+#
+# This MUST resolve to the same path regardless of invocation context:
+#
+#   - scan-rovo-panes runs as a Herdr-invoked plugin command, so Herdr injects
+#     the plugin-scoped HERDR_PLUGIN_STATE_DIR into its environment.
+#   - rovo-herdr-hook runs as a child process of Rovo itself, inheriting the
+#     Rovo pane's environment. That environment carries pane-scoped variables
+#     (HERDR_PANE_ID, HERDR_BIN_PATH) but there is no plugin invocation
+#     happening for it to inherit HERDR_PLUGIN_STATE_DIR from.
+#
+# Previously this read HERDR_PLUGIN_STATE_DIR with a ${TMPDIR}/herdr-rovo-dev
+# fallback, which meant the scanner and the hook resolved to two different
+# directories: the hook would write its "pane is hooked" marker under
+# ${TMPDIR}/herdr-rovo-dev, but the scanner would only ever look under the
+# Herdr-provided plugin state dir, so it never saw the marker and could
+# reclassify (and reset) a pane that hooks were already reporting on
+# correctly. Using a single deterministic, XDG-style path instead means both
+# call sites agree without depending on which one happens to run in a
+# Herdr-plugin context. HERDR_ROVO_STATE_DIR remains as an override for tests.
 state_dir() {
-  local dir="${HERDR_PLUGIN_STATE_DIR:-${TMPDIR:-/tmp}/herdr-rovo-dev}"
+  local dir="${HERDR_ROVO_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/herdr-rovo-dev}"
   mkdir -p "$dir" 2>/dev/null || true
   printf '%s' "$dir"
 }
@@ -82,6 +102,56 @@ clear_pane_hooked() {
   rm -f "$(hook_marker_file "$pane_id")" 2>/dev/null || true
 }
 
+# --- Exit-reset debounce ---------------------------------------------------
+#
+# The scanner resets a previously-tracked pane to idle/"exited" once it is no
+# longer detected as Rovo. Foreground-process detection is momentary, though: a
+# single scan can miss a live session - e.g. a child process briefly owns the
+# pane's controlling terminal during a tool call, or a one-off process-info
+# read fails. Resetting on the very first miss would wrongly flip an active,
+# still-working (and possibly hook-reporting) pane to "exited". So misses are
+# counted per pane and the reset only fires once a pane has been missing for
+# ROVO_MISS_THRESHOLD scans in a row; any scan that re-detects the pane clears
+# its counter. This still catches a genuinely-gone pane (its count climbs past
+# the threshold) while tolerating transient blips.
+readonly ROVO_MISS_THRESHOLD="${ROVO_MISS_THRESHOLD:-2}"
+
+misses_dir() {
+  local dir
+  dir="$(state_dir)/misses"
+  mkdir -p "$dir" 2>/dev/null || true
+  printf '%s' "$dir"
+}
+
+miss_count_file() {
+  local pane_id="$1"
+  printf '%s/%s' "$(misses_dir)" "$(printf '%s' "$pane_id" | tr '/' '_')"
+}
+
+# Print a pane's current consecutive-miss count (0 when none/unset/corrupt).
+get_miss_count() {
+  local count
+  count="$(cat "$(miss_count_file "$1")" 2>/dev/null || true)"
+  case "$count" in
+    '' | *[!0-9]*) printf '0' ;;
+    *) printf '%s' "$count" ;;
+  esac
+}
+
+# Increment, persist, and print a pane's consecutive-miss count.
+bump_miss_count() {
+  local pane_id="$1" next
+  next="$(( $(get_miss_count "$pane_id") + 1 ))"
+  printf '%s' "$next" > "$(miss_count_file "$pane_id")" 2>/dev/null || true
+  printf '%s' "$next"
+}
+
+# Reset a pane's consecutive-miss count (it was re-detected, or has been reset).
+clear_miss_count() {
+  local pane_id="$1"
+  rm -f "$(miss_count_file "$pane_id")" 2>/dev/null || true
+}
+
 # jq must be available for JSON parsing.
 require_jq() {
   if ! command -v jq >/dev/null 2>&1; then
@@ -123,7 +193,12 @@ pane_foreground_cmdlines() {
 #                          binary that may itself be named `rovo` or
 #                          `atlassian_cli_rovodev`), also `rovo run`, and
 #                          `rovo --restore <session-id>` (reattaching a prior
-#                          session) or other flags/args.
+#                          session) or other flags/args. The new CLI's real
+#                          foreground process can also be the bare binary
+#                          itself with NO subcommand at all, e.g.
+#                          `atlassian_cli_rovodev` or
+#                          `atlassian_cli_rovodev --restore <session-id>`, with
+#                          no `rovo` launcher anywhere in the process tree.
 #
 # Non-interactive `serve` sessions (e.g. the IDE-embedded
 # `atlassian_cli_rovodev serve ...`) are deliberately NOT matched - they are not
@@ -141,10 +216,18 @@ pane_is_rovo() {
   # <session-id>` when reattaching a session - do not prevent detection.
   # Without this, such panes are treated as "no longer Rovo" and get
   # force-reset to idle on every scan, regardless of their actual state.
+  #
+  # The `atlassian_cli_rovodev` alternative matches the binary regardless of
+  # what (if anything) follows it, rather than requiring a literal trailing
+  # `run`: the new Rovo CLI's real foreground process is frequently the bare
+  # binary with no subcommand at all. The preceding serve-exclusion filter
+  # already strips `atlassian_cli_rovodev serve` lines before this positive
+  # match runs, so broadening this alternative does not start matching serve
+  # sessions.
   printf '%s\n' "$cmds" \
     | grep -Ev '(atlassian_cli_rovodev|acli[[:space:]]+rovodev|(^|/|[[:space:]])rovo)[[:space:]]+serve([[:space:]]|$)' \
     | grep -Eq \
-      '(^|/|[[:space:]])rovo([[:space:]]+run)?([[:space:]]|$)|(atlassian_cli_rovodev[[:space:]]+run)|(acli[[:space:]]+rovodev[[:space:]]+run)'
+      '(^|/|[[:space:]])rovo([[:space:]]+run)?([[:space:]]|$)|atlassian_cli_rovodev([[:space:]]|$)|(acli[[:space:]]+rovodev[[:space:]]+run)'
 }
 
 # Classify the semantic state of a Rovo pane from its recent visible output.
