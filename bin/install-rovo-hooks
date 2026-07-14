@@ -28,8 +28,8 @@ if [ "${1:-}" = "--auto" ]; then
   shift
 fi
 
-HOOK_CMD="$SCRIPT_DIR/rovo-herdr-hook"
 HOOK_MARKER="rovo-herdr-hook"
+HOOK_CMD=""
 YQ_BIN=""
 EVENTS=(
   on_session_start
@@ -97,6 +97,64 @@ install_for_event() {
     "$config"
 }
 
+# Copy the stable launcher script to a location next to the resolved Rovo
+# config, and register that copy as the hook command. This is preferred over
+# registering the plugin's own bin/rovo-herdr-hook path directly, because
+# Herdr relocates a freshly-installed plugin out of an ephemeral temp checkout
+# into a content-hashed directory (and re-hashes again on every upgrade), so
+# any path captured at install time eventually stops existing. The launcher
+# resolves the plugin's current location itself, at fire-time, via Herdr's
+# public `plugin list` API - see rovo-herdr-hook-launcher for details.
+#
+# NOTE: this sets the global HOOK_CMD directly rather than "returning" via a
+# command substitution ($(...)). skip_or_fail must be able to terminate the
+# whole script (exit 0 in --auto mode, exit 1 otherwise); calling it from
+# inside a command substitution would only terminate that subshell, silently
+# swallowing the failure and leaving HOOK_CMD empty.
+install_launcher() {
+  local config="$1"
+  local launcher_src="$SCRIPT_DIR/rovo-herdr-hook-launcher"
+  if [ ! -f "$launcher_src" ]; then
+    skip_or_fail "missing bundled launcher: $launcher_src"
+  fi
+
+  local config_dir launcher_dir launcher_dest
+  config_dir="$(dirname "$config")"
+  launcher_dir="$config_dir/hooks/herdr-managed"
+  launcher_dest="$launcher_dir/rovo-herdr-hook"
+
+  # Defensive guard: never persist a hook command that lives under an
+  # ephemeral install temp dir, or anywhere outside the config's own
+  # directory tree. This is the exact class of bug that made the old
+  # $SCRIPT_DIR-captured path go stale within seconds of a fresh GitHub
+  # install (see docs/rovo-status-fix-plan.md, Bug 1).
+  case "$launcher_dest" in
+    *"/.tmp-install-"*)
+      skip_or_fail "refusing to record an ephemeral install path as the Rovo hook command: $launcher_dest"
+      ;;
+  esac
+  case "$launcher_dest" in
+    "$config_dir"/*) ;;
+    *)
+      skip_or_fail "refusing to record a hook command outside the Rovo config directory: $launcher_dest"
+      ;;
+  esac
+
+  # Route filesystem failures through skip_or_fail rather than letting `set -e`
+  # abort with a bare non-zero exit. In --auto (build) mode that keeps the
+  # contract that a best-effort hook install never fails the plugin install
+  # (skip_or_fail exits 0 there); in manual mode it still surfaces a clear
+  # error and exits 1.
+  mkdir -p "$launcher_dir" \
+    || skip_or_fail "could not create launcher directory: $launcher_dir"
+  cp -p "$launcher_src" "$launcher_dest" \
+    || skip_or_fail "could not install launcher: $launcher_dest"
+  chmod +x "$launcher_dest" \
+    || skip_or_fail "could not make launcher executable: $launcher_dest"
+
+  HOOK_CMD="$launcher_dest"
+}
+
 main() {
   if ! require_yq; then
     skip_or_fail "yq is required to install Rovo hooks (install it with: brew install yq)"
@@ -107,6 +165,8 @@ main() {
   if [ ! -f "$config" ]; then
     skip_or_fail "Rovo config not found: $config"
   fi
+
+  install_launcher "$config"
 
   local backup="${config}.before-herdr-rovo-dev.$(date +%Y%m%d%H%M%S)"
   cp -p "$config" "$backup"
