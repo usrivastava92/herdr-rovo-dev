@@ -23,6 +23,16 @@ once they are active for a pane:
    tool permission requested, tool started, run completed, and session ended.
    These carry structured, semantic event names straight from Rovo's own
    lifecycle, so they are immune to any future wording/UI changes in the CLI.
+   Rovo's config only ever records the path to a small, stable **launcher**
+   script (`bin/rovo-herdr-hook-launcher`, installed to
+   `~/.rovo/hooks/herdr-managed/rovo-herdr-hook`), never a path into the
+   plugin's own install directory. The plugin's own directory is not a stable
+   thing to reference: a fresh install briefly lives in an ephemeral temp
+   checkout before Herdr relocates it, and it gets a new content hash on every
+   upgrade after that. The launcher absorbs all of that churn by resolving the
+   plugin's *current* location itself, at fire-time, through Herdr's public
+   `plugin list` API, so the command recorded in Rovo's config never goes
+   stale.
 2. **Pane scanning** as a fallback that only applies to panes with **no active
    hook pipeline yet** - e.g. already-running panes from before hooks were
    installed, or sessions where hooks are not (yet) firing for some other
@@ -151,6 +161,10 @@ To remove the bridge hooks:
 herdr plugin action invoke uninstall-hooks --plugin rovo-dev.detector
 ```
 
+This also removes the stable launcher copy that was placed next to the config
+(e.g. `~/.rovo/hooks/herdr-managed/rovo-herdr-hook`), so uninstall leaves no
+residue.
+
 Then confirm:
 
 ```sh
@@ -207,6 +221,7 @@ herdr-rovo-dev/
   bin/
     scan-rovo-panes   main scanner
     rovo-herdr-hook    Rovo event hook bridge
+    rovo-herdr-hook-launcher  stable launcher copied into ~/.rovo/hooks/
     install-rovo-hooks installs bridge commands into Rovo config
     uninstall-rovo-hooks removes bridge commands from Rovo config
     herdr-lib.sh      shared helpers (detection, classification, reporting)

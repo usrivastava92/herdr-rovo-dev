@@ -25,6 +25,7 @@ command = [
   "+x",
   "bin/scan-rovo-panes",
   "bin/rovo-herdr-hook",
+  "bin/rovo-herdr-hook-launcher",
   "bin/install-rovo-hooks",
   "bin/uninstall-rovo-hooks",
   "bin/herdr-lib.sh",

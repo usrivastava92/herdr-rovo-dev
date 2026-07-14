@@ -47,5 +47,11 @@ MARKER="$HOOK_MARKER" "$YQ_BIN" -i \
   '(.eventHooks.events[].commands) |= ((. // []) | map(select(((.command // "") | contains(strenv(MARKER))) | not)))' \
   "$config"
 
+# Best-effort removal of the stable launcher copy install-rovo-hooks placed
+# next to this config, so uninstall is symmetric and leaves no residue.
+launcher_dir="$(dirname "$config")/hooks/herdr-managed"
+rm -f "$launcher_dir/rovo-herdr-hook" 2>/dev/null || true
+rmdir "$launcher_dir" 2>/dev/null || true
+
 echo "Removed Herdr Rovo hooks from $config"
 echo "Backup: $backup"

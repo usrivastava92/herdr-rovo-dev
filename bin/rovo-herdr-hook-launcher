@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+#
+# rovo-herdr-hook-launcher - stable indirection to the real Herdr Rovo hook.
+#
+# install-rovo-hooks copies this file to a stable, Rovo-owned location
+# (e.g. ~/.rovo/hooks/herdr-managed/rovo-herdr-hook) and registers THAT path in
+# Rovo's config.yml. Rovo invokes it on every lifecycle event.
+#
+# Why the indirection: Herdr builds a plugin in an ephemeral temp checkout, then
+# relocates it to a content-hashed directory and re-hashes on every upgrade. Any
+# absolute path into the plugin's own bin/ captured at install time therefore
+# goes stale (immediately for the temp dir, or on the next upgrade). This
+# launcher resolves the plugin's CURRENT root at fire-time, so the path recorded
+# in Rovo's config never rots.
+set -u
+
+HB="${HERDR_BIN_PATH:-herdr}"
+
+root="$("$HB" plugin list --plugin rovo-dev.detector --json 2>/dev/null \
+  | jq -r '.result.plugins[]? | select(.plugin_id == "rovo-dev.detector") | .plugin_root' 2>/dev/null \
+  | head -n1)"
+
+# A failed hook must never disrupt the Rovo session, and a missed event just
+# leaves that transition to the next scan. So if we cannot resolve the current
+# install (Herdr server down, plugin removed, jq missing), do nothing.
+[ -n "${root:-}" ] || exit 0
+[ -x "$root/bin/rovo-herdr-hook" ] || exit 0
+
+# stdin (the JSON payload) and the environment are inherited across exec.
+exec "$root/bin/rovo-herdr-hook" "$@"
