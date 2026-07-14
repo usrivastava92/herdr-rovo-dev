@@ -29,33 +29,47 @@ require_jq || exit 1
 TRACKED="$(tracked_file)"
 touch "$TRACKED" 2>/dev/null || true
 
-# Panes we mark as Rovo during this run.
+# Panes detected as Rovo during this run.
 declare -a current_rovo=()
+# Panes to persist as tracked for the next run: those detected as Rovo now,
+# plus any previously-tracked pane whose consecutive-miss count has not yet
+# reached the reset threshold (so it gets another scan to recover before we
+# declare it exited). See the debounce note in herdr-lib.sh.
+declare -a keep_tracked=()
 
 while IFS= read -r pane_id; do
   [ -n "$pane_id" ] || continue
 
   if pane_is_rovo "$pane_id"; then
+    # Re-detected: forget any misses accumulated from earlier transient blips.
+    clear_miss_count "$pane_id"
     if pane_hook_active "$pane_id"; then
       # Hooks are actively firing for this pane; they are authoritative and
       # more reliable than screen-scraping. Leave their last-reported state
       # untouched and only track the pane so the exit-reset logic below still
       # applies if Rovo later exits without a clean on_session_end.
       current_rovo+=("$pane_id")
+      keep_tracked+=("$pane_id")
       echo "skip $pane_id (hook-active, trusting last hook report)"
     else
       state="$(classify_state "$pane_id")"
       custom_status="$(derive_custom_status "$pane_id")"
       if report_agent "$pane_id" "$state" "$custom_status"; then
         current_rovo+=("$pane_id")
+        keep_tracked+=("$pane_id")
         echo "reported $pane_id state=$state ${custom_status:+status=$custom_status}"
       fi
     fi
   fi
 done < <(list_pane_ids)
 
-# Reset any previously-tracked pane that is no longer running Rovo. This covers
-# panes where Rovo exited or was replaced by another foreground process.
+# Handle previously-tracked panes that are no longer detected as Rovo. This
+# covers panes where Rovo exited or was replaced by another foreground process.
+# A single miss is not enough to declare a session gone - foreground-process
+# detection is momentary, so a live session can be missed for one scan (e.g. a
+# child process briefly owns the terminal, or a process-info read fails). Only
+# reset once a pane has been missing for ROVO_MISS_THRESHOLD scans in a row;
+# until then keep tracking it so it can recover on the next scan.
 if [ -s "$TRACKED" ]; then
   while IFS= read -r old_pane; do
     [ -n "$old_pane" ] || continue
@@ -63,15 +77,22 @@ if [ -s "$TRACKED" ]; then
     for p in "${current_rovo[@]:-}"; do
       [ "$p" = "$old_pane" ] && still=1 && break
     done
-    if [ "$still" -eq 0 ]; then
+    [ "$still" -eq 1 ] && continue
+
+    misses="$(bump_miss_count "$old_pane")"
+    if [ "$misses" -ge "$ROVO_MISS_THRESHOLD" ]; then
       report_agent "$old_pane" "idle" "exited" \
-        && echo "reset $old_pane -> idle (exited)"
+        && echo "reset $old_pane -> idle (exited after $misses misses)"
       clear_pane_hooked "$old_pane"
+      clear_miss_count "$old_pane"
+    else
+      keep_tracked+=("$old_pane")
+      echo "miss $old_pane ($misses/$ROVO_MISS_THRESHOLD) - deferring reset"
     fi
   done < "$TRACKED"
 fi
 
-# Persist the current set of Rovo panes for the next run.
-printf '%s\n' "${current_rovo[@]:-}" | sed '/^$/d' > "$TRACKED"
+# Persist the tracked set (detected now, plus deferred misses) for the next run.
+printf '%s\n' "${keep_tracked[@]:-}" | sed '/^$/d' > "$TRACKED"
 
 exit 0
