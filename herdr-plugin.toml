@@ -1,6 +1,6 @@
 id = "rovo-dev.detector"
 name = "Rovo Dev Detector"
-version = "1.2.1"
+version = "1.2.2"
 min_herdr_version = "0.7.0"
 description = "Detect Rovo CLI and Rovo Dev CLI panes and report them as Herdr agents"
 # Portable across any platform with a POSIX shell + coreutils (bash, jq, grep,
