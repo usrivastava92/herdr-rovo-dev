@@ -292,7 +292,38 @@ derive_custom_status() {
   return 0
 }
 
+# Carry a pane's custom status (e.g. Rovo's agent mode or the current tool) to
+# Herdr as a state label, via `pane report-metadata`.
+#
+# This MUST be a separate call from report_agent's `pane report-agent`: the
+# `report-agent` verb has no flag for a custom status. Passing an unknown flag
+# like `--custom-status` makes the Herdr CLI reject the *entire* invocation
+# (`unknown option`, non-zero exit) before it reaches the server, so the agent
+# state itself never lands and the Rovo pane silently never appears in Herdr's
+# agents list. Custom status is decorative, so a failure here must never fail
+# the caller's state report - this always returns 0, but logs to stderr (which
+# Herdr captures into the plugin log) so a future CLI-contract break stays
+# diagnosable instead of vanishing.
+report_custom_status() {
+  local pane_id="$1" state="$2" custom_status="$3" seq="${4:-}"
+  [ -n "$custom_status" ] || return 0
+  local meta=(pane report-metadata "$pane_id"
+    --source "$ROVO_SOURCE"
+    --agent "$ROVO_AGENT"
+    --state-label "$state=$custom_status")
+  [ -n "$seq" ] && meta+=(--seq "$seq")
+  local err
+  if ! err="$("$(herdr_bin)" "${meta[@]}" 2>&1 >/dev/null)"; then
+    echo "herdr-rovo-dev: 'pane report-metadata' (custom status) failed for pane $pane_id: ${err:-<no output>}" >&2
+  fi
+  return 0
+}
+
 # Report a pane as a Rovo agent with the given state and optional custom status.
+# Returns the exit status of the core `report-agent` call (non-zero when Herdr
+# rejected it), so callers can tell a real report from a failed one. The custom
+# status, if any, is reported best-effort via report_custom_status and never
+# affects this return code.
 report_agent() {
   local pane_id="$1" state="$2" custom_status="$3"
   local agent_session_id="${4:-}"
@@ -303,11 +334,25 @@ report_agent() {
     --source "$ROVO_SOURCE"
     --agent "$ROVO_AGENT"
     --state "$state")
-  [ -n "$custom_status" ] && args+=(--custom-status "$custom_status")
   [ -n "$agent_session_id" ] && args+=(--agent-session-id "$agent_session_id")
   [ -n "$message" ] && args+=(--message "$message")
   [ -n "$seq" ] && args+=(--seq "$seq")
-  "$(herdr_bin)" "${args[@]}" >/dev/null 2>&1
+
+  # Report the core agent state. Capture stderr (not silently discard it) so a
+  # rejected call is visible in the plugin log rather than failing invisibly.
+  local err rc
+  if err="$("$(herdr_bin)" "${args[@]}" 2>&1 >/dev/null)"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  if [ "$rc" -ne 0 ]; then
+    echo "herdr-rovo-dev: 'pane report-agent' failed (exit $rc) for pane $pane_id: ${err:-<no output>}" >&2
+    return "$rc"
+  fi
+
+  report_custom_status "$pane_id" "$state" "$custom_status" "$seq"
+  return 0
 }
 
 # Resolve the pane associated with a Rovo hook invocation. Rovo inherits the

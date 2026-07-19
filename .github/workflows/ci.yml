@@ -25,4 +25,14 @@ jobs:
             bin/rovo-herdr-hook \
             bin/rovo-herdr-hook-launcher \
             bin/scan-rovo-panes \
-            bin/uninstall-rovo-hooks
+            bin/uninstall-rovo-hooks \
+            tests/run.sh \
+            tests/report-agent.test.sh
+
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests
+        run: bash tests/run.sh

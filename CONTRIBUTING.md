@@ -43,6 +43,13 @@ Before opening a PR, run a syntax check:
 bash -n bin/scan-rovo-panes bin/herdr-lib.sh bin/check-deps
 ```
 
+And run the tests. They drive the library functions against a fake `herdr`
+binary, so they need no real Herdr server:
+
+```sh
+bash tests/run.sh
+```
+
 ## Commit style
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/).
