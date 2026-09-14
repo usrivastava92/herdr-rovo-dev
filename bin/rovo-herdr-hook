@@ -26,7 +26,6 @@ tool_name="$(printf '%s' "$payload" \
       // .attributes.tool_results[0].tool_name
       // empty
     ' 2>/dev/null || true)"
-
 pane_id="$(resolve_rovo_hook_pane "$cwd" 2>/dev/null || true)"
 [ -n "$pane_id" ] || exit 0
 
@@ -44,6 +43,18 @@ fi
 
 if [ -n "$session_id" ]; then
   report_session_title "$pane_id" "$session_id"
+fi
+
+if [ "$event_name" = "on_tool_start" ] && [ "$tool_name" = "ask_user_questions" ]; then
+  mark_interactive_wait "$pane_id"
+elif { [ "$event_name" = "on_tool_end" ] && [ "$tool_name" = "ask_user_questions" ]; } \
+  || [ "$event_name" = "on_user_prompt" ]; then
+  clear_interactive_wait "$pane_id"
+fi
+
+if interactive_wait_active "$pane_id"; then
+  report_agent "$pane_id" "blocked" "input" "$session_id" "Rovo Dev is waiting for input" || true
+  exit 0
 fi
 
 # Rovo's on_complete event is authoritative. Reporting synchronously avoids a

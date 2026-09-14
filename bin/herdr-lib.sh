@@ -128,6 +128,23 @@ clear_pane_hooked() {
   rm -f "$(hook_marker_file "$pane_id")" 2>/dev/null || true
 }
 
+interactive_wait_file() {
+  local pane_id="$1"
+  printf '%s/interactive-wait-%s' "$(state_dir)" "$(printf '%s' "$pane_id" | tr '/' '_')"
+}
+
+mark_interactive_wait() {
+  touch "$(interactive_wait_file "$1")" 2>/dev/null || true
+}
+
+interactive_wait_active() {
+  [ -e "$(interactive_wait_file "$1")" ]
+}
+
+clear_interactive_wait() {
+  rm -f "$(interactive_wait_file "$1")" 2>/dev/null || true
+}
+
 # --- Exit-reset debounce ---------------------------------------------------
 #
 # The scanner resets a previously-tracked pane to idle/"exited" once it is no
