@@ -4,7 +4,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-mkdir -p "$WORK/bin" "$WORK/state" "$WORK/sessions/session-1"
+mkdir -p "$WORK/bin" "$WORK/state" "$WORK/sessions/session-1" "$WORK/sessions/session-2"
 LOG="$WORK/herdr.log"
 
 cat > "$WORK/bin/herdr" <<'STUB'

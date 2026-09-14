@@ -29,6 +29,12 @@ tool_name="$(printf '%s' "$payload" \
 pane_id="$(resolve_rovo_hook_pane "$cwd" 2>/dev/null || true)"
 [ -n "$pane_id" ] || exit 0
 
+case "$event_name" in
+  on_session_start|on_complete|on_session_end)
+    rovo_session_is_top_level "$session_id" || exit 0
+    ;;
+esac
+
 # Track hook-pipeline liveness for this pane BEFORE any state for it becomes
 # externally visible below, so scan-rovo-panes' scraping fallback can never
 # race in during the hand-off and re-derive (and potentially clobber) state

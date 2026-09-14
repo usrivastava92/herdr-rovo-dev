@@ -438,6 +438,21 @@ short_status() {
   printf '%s' "$1" | tr '\n' ' ' | cut -c 1-80
 }
 
+rovo_session_is_top_level() {
+  local session_id="$1" sessions_dir
+  [ -n "$session_id" ] || return 1
+
+  for sessions_dir in \
+    "${ROVO_SESSIONS_DIR:-}" \
+    "${ROVO_USER_DIR:-$HOME/.rovo}/sessions" \
+    "${ROVODEV_USER_DIR:-$HOME/.rovodev}/sessions"; do
+    [ -n "$sessions_dir" ] || continue
+    [ -d "$sessions_dir/$session_id" ] && return 0
+  done
+
+  return 1
+}
+
 rovo_session_title() {
   local session_id="$1" sessions_dir metadata_file title
   [ -n "$session_id" ] || return 1

@@ -4,7 +4,7 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-mkdir -p "$WORK/bin" "$WORK/state"
+mkdir -p "$WORK/bin" "$WORK/state" "$WORK/sessions/session-1"
 LOG="$WORK/herdr.log"
 
 cat > "$WORK/bin/herdr" <<'STUB'
@@ -19,6 +19,7 @@ run_hook() {
     HERDR_BIN_PATH="$WORK/bin/herdr" \
     HERDR_STUB_LOG="$LOG" \
     HERDR_ROVO_STATE_DIR="$WORK/state" \
+    ROVO_SESSIONS_DIR="$WORK/sessions" \
     HERDR_PANE_ID="w1:p3" \
     bash "$REPO_ROOT/bin/rovo-herdr-hook"
 }
