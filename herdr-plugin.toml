@@ -4,7 +4,8 @@ version = "1.2.2"
 min_herdr_version = "0.7.0"
 description = "Detect Rovo CLI and Rovo Dev CLI panes and report them as Herdr agents"
 # Portable across any platform with a POSIX shell + coreutils (bash, jq, grep,
-# sed). That covers macOS and Linux; on Windows it works under WSL/Git Bash.
+# sed) and Python 3. That covers macOS and Linux; on Windows it works under
+# WSL/Git Bash.
 # Detection uses `herdr pane process-info` output rather than OS-specific tools,
 # so there is nothing macOS- or Linux-specific in the logic.
 platforms = ["macos", "linux"]

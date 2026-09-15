@@ -8,7 +8,7 @@ Requirements:
 
 - [Herdr](https://herdr.dev) >= 0.7.0
 - macOS or Linux (Windows via WSL/Git Bash)
-- `bash`, `jq`, `grep`, `sed` on `PATH`
+- `bash`, `jq`, `grep`, `sed`, `python3` on `PATH`
 
 Link the plugin from your working copy so edits take effect immediately:
 
@@ -40,7 +40,7 @@ You can also run the scanner directly inside a Herdr pane:
 Before opening a PR, run a syntax check:
 
 ```sh
-bash -n bin/scan-rovo-panes bin/herdr-lib.sh bin/check-deps
+bash -n bin/scan-rovo-panes bin/herdr-lib.sh bin/check-deps bin/rovo-herdr-hook
 ```
 
 And run the tests. They drive the library functions against a fake `herdr`

@@ -7,10 +7,36 @@
 
 # Stable identifiers used when reporting agents to Herdr.
 readonly ROVO_SOURCE="plugin:rovo-dev"
+readonly ROVO_TITLE_SOURCE="plugin:rovo-dev:title"
 readonly ROVO_AGENT="rovo-dev"
 
-# Number of trailing output lines to inspect when classifying pane state.
+# Number of trailing output lines to FETCH from Herdr when classifying pane
+# state. This is scrollback context, not what's necessarily actually on
+# screen right now - see ROVO_STATE_SLICE_LINES below, which controls how
+# much of this fetched window classify_state actually looks at.
 readonly ROVO_READ_LINES="${ROVO_READ_LINES:-60}"
+
+# Number of lines, counted from the BOTTOM of the fetched output, that
+# classify_state actually pattern-matches against. Deliberately much smaller
+# than ROVO_READ_LINES: a pane's scrollback can carry now-stale status text
+# (e.g. a "Rovo Dev is thinking" or an active-tool line from an earlier,
+# already-finished turn) that has scrolled up but is still within the fetched
+# window. Matching against the whole fetched window lets that stale text
+# outvote a current, genuinely idle bottom-of-screen prompt and misreport a
+# quiet pane as "working" - observed live for old panes that predate hook
+# installation, which have enough scrollback for this to bite (hooked panes
+# are unaffected; the scanner trusts their hook reports and never calls
+# classify_state for them at all). Restricting matching to a small slice near
+# the bottom approximates "what's actually on screen right now" from a plain
+# scrollback read.
+#
+# 15 was still too generous: a live audit pane (w1:p3) was visibly idle but
+# had its own assistant message mention the phrase "Rovo Dev is thinking"
+# 14 lines from the bottom - inside a 15-line slice, so it still misreported
+# as working. Separately measuring real working/idle footer markers across
+# active and idle panes (w1:p2, w2) found all of them within the bottom 8
+# lines, so the default is pinned there instead. Kept overridable for tests.
+readonly ROVO_STATE_SLICE_LINES="${ROVO_STATE_SLICE_LINES:-8}"
 
 # Resolve the Herdr binary. Inside a plugin/pane, HERDR_BIN_PATH is injected;
 # fall back to `herdr` on PATH for manual runs.
@@ -100,6 +126,23 @@ pane_hook_active() {
 clear_pane_hooked() {
   local pane_id="$1"
   rm -f "$(hook_marker_file "$pane_id")" 2>/dev/null || true
+}
+
+interactive_wait_file() {
+  local pane_id="$1"
+  printf '%s/interactive-wait-%s' "$(state_dir)" "$(printf '%s' "$pane_id" | tr '/' '_')"
+}
+
+mark_interactive_wait() {
+  touch "$(interactive_wait_file "$1")" 2>/dev/null || true
+}
+
+interactive_wait_active() {
+  [ -e "$(interactive_wait_file "$1")" ]
+}
+
+clear_interactive_wait() {
+  rm -f "$(interactive_wait_file "$1")" 2>/dev/null || true
 }
 
 # --- Exit-reset debounce ---------------------------------------------------
@@ -234,12 +277,18 @@ pane_is_rovo() {
 # Prints one of: working | blocked | idle | unknown
 classify_state() {
   local pane_id="$1"
-  local out
+  local out slice
   out="$("$(herdr_bin)" pane read "$pane_id" --source recent-unwrapped \
     --lines "$ROVO_READ_LINES" 2>/dev/null)" || {
     printf 'unknown'
     return 0
   }
+
+  # Pattern-match only the bottom slice (see ROVO_STATE_SLICE_LINES above),
+  # never the whole fetched window - the whole window can contain stale
+  # status text from an earlier, already-finished turn that no longer
+  # reflects the pane's current state.
+  slice="$(printf '%s' "$out" | tail -n "$ROVO_STATE_SLICE_LINES")"
 
   # Working: Rovo is actively thinking or executing a tool call.
   #
@@ -253,21 +302,21 @@ classify_state() {
   # idle-state check below, which matches the "? for shortcuts" footer that
   # is *always* visible regardless of whether Rovo is actively working -
   # causing working sessions to be misreported as idle.
-  if printf '%s' "$out" | grep -Eq \
+  if printf '%s' "$slice" | grep -Eq \
     'Rovo( Dev)? is (thinking|working|running)|(Esc to interrupt)|(Enter to queue,? Ctrl\+Enter to steer)|(▶[^|]+\|[[:space:]]*[a-z_]+[[:space:]]*$)'; then
     printf 'working'
     return 0
   fi
 
   # Blocked: Rovo is waiting on the user for a decision or input.
-  if printf '%s' "$out" | grep -Eq \
+  if printf '%s' "$slice" | grep -Eq \
     '\[y/n\]|\(y/n\)|Do you want to|Waiting for (your )?(input|confirmation)|Approve|Allow this|Choose an option|Select an option|Press Enter to'; then
     printf 'blocked'
     return 0
   fi
 
   # Idle: an interactive prompt is present and nothing is in flight.
-  if printf '%s' "$out" | grep -Eq '\? for shortcuts|agent mode:'; then
+  if printf '%s' "$slice" | grep -Eq '\? for shortcuts|agent mode:'; then
     printf 'idle'
     return 0
   fi
@@ -329,7 +378,7 @@ report_agent() {
   local agent_session_id="${4:-}"
   local message="${5:-}"
   local seq
-  seq="$(date +%s 2>/dev/null || true)"
+  seq="$(python3 -c 'import time; print(time.time_ns())' 2>/dev/null || true)"
   local args=(pane report-agent "$pane_id"
     --source "$ROVO_SOURCE"
     --agent "$ROVO_AGENT"
@@ -387,6 +436,54 @@ resolve_rovo_hook_pane() {
 
 short_status() {
   printf '%s' "$1" | tr '\n' ' ' | cut -c 1-80
+}
+
+rovo_session_is_top_level() {
+  local session_id="$1" sessions_dir
+  [ -n "$session_id" ] || return 1
+
+  for sessions_dir in \
+    "${ROVO_SESSIONS_DIR:-}" \
+    "${ROVO_USER_DIR:-$HOME/.rovo}/sessions" \
+    "${ROVODEV_USER_DIR:-$HOME/.rovodev}/sessions"; do
+    [ -n "$sessions_dir" ] || continue
+    [ -d "$sessions_dir/$session_id" ] && return 0
+  done
+
+  return 1
+}
+
+rovo_session_title() {
+  local session_id="$1" sessions_dir metadata_file title
+  [ -n "$session_id" ] || return 1
+
+  for sessions_dir in \
+    "${ROVO_SESSIONS_DIR:-}" \
+    "${ROVO_USER_DIR:-$HOME/.rovo}/sessions" \
+    "${ROVODEV_USER_DIR:-$HOME/.rovodev}/sessions"; do
+    [ -n "$sessions_dir" ] || continue
+    metadata_file="$sessions_dir/$session_id/metadata.json"
+    [ -f "$metadata_file" ] || continue
+    title="$(jq -r '(.title // empty) | strings' "$metadata_file" 2>/dev/null || true)"
+    [ -n "$title" ] || continue
+    printf '%s' "$title"
+    return 0
+  done
+
+  return 1
+}
+
+report_session_title() {
+  local pane_id="$1" session_id="$2" title
+  title="$(rovo_session_title "$session_id")" || title="Rovo Dev"
+  "$(herdr_bin)" pane report-metadata "$pane_id" \
+    --source "$ROVO_TITLE_SOURCE" \
+    --agent "$ROVO_AGENT" \
+    --applies-to-source "$ROVO_SOURCE" \
+    --display-agent "$title" \
+    --clear-token task_name \
+    --token "session_title=$title" \
+    >/dev/null 2>&1 || true
 }
 
 # Resolve the Rovo config.yml to operate on, supporting both CLIs:

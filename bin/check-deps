@@ -9,9 +9,9 @@
 
 set -u
 
-# Required host tools. bash/grep/sed are effectively ubiquitous on macOS/Linux;
-# jq is the one genuinely-optional package a user may not have.
-REQUIRED=(bash jq grep sed)
+# Required host tools. python3 provides nanosecond lifecycle report sequences;
+# second-resolution timestamps can collide and leave Herdr with stale state.
+REQUIRED=(bash jq grep sed python3)
 
 missing=()
 for tool in "${REQUIRED[@]}"; do
@@ -25,12 +25,12 @@ if [ "${#missing[@]}" -gt 0 ]; then
     echo "herdr-rovo-dev: cannot install - missing required tool(s): ${missing[*]}"
     echo
     echo "This plugin runs as shell scripts and needs these on PATH:"
-    echo "  bash, jq, grep, sed"
+    echo "  bash, jq, grep, sed, python3"
     echo
     echo "Install the missing tool(s), e.g.:"
-    echo "  macOS:  brew install jq"
-    echo "  Debian: sudo apt-get install -y jq"
-    echo "  Fedora: sudo dnf install -y jq"
+    echo "  macOS:  brew install jq python"
+    echo "  Debian: sudo apt-get install -y jq python3"
+    echo "  Fedora: sudo dnf install -y jq python3"
     echo
     echo "Then re-run: herdr plugin install <owner>/herdr-rovo-dev"
   } >&2
