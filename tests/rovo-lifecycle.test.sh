@@ -72,4 +72,13 @@ if ! printf '%s' "$last_report" | grep -Fq -- '--state idle'; then
   status=1
 fi
 
+reports_before="$(grep -Fc 'pane report-agent w1:p3' "$LOG")"
+run_hook on_tool_start child-1
+run_hook on_tool_end child-1
+reports_after="$(grep -Fc 'pane report-agent w1:p3' "$LOG")"
+if [ "$reports_after" -ne "$reports_before" ]; then
+  echo "FAIL: late nested tool events must not overwrite parent completion" >&2
+  status=1
+fi
+
 exit "$status"
