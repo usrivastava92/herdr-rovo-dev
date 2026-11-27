@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Rovo's hook stdout is captured: deliver desktop status to the inherited tty.
+set -u
+
+[ "${HERDR_ROVO_TRANSPORT:-}" = osc ] || exit 0
+
+# Never accept a normal file, another character device, or a caller's output path.
+tty_path="${HERDR_ROVO_TTY:-}"
+if [[ ! "$tty_path" =~ ^/dev/(tty[[:alnum:]]*|pts/[0-9]+)$ ]] || [ ! -c "$tty_path" ]; then
+  printf '%s\n' 'rovo-herdr-desktop-hook: no valid inherited terminal; launch Rovo with rovo-herdr-desktop.' >&2
+  exit 0
+fi
+if ! { exec 3>"$tty_path"; } 2>/dev/null || [ ! -t 3 ]; then
+  printf '%s\n' 'rovo-herdr-desktop-hook: inherited terminal is unavailable; restart rovo-herdr-desktop in a terminal.' >&2
+  exit 0
+fi
+command -v jq >/dev/null 2>&1 || exit 0
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./rovo-event.sh
+source "$SCRIPT_DIR/rovo-event.sh"
+payload="$(cat 2>/dev/null)" || exit 0
+rovo_parse_event "$payload" || exit 0
+
+kind=""
+case "$event_name" in
+  on_complete) state=done ;;
+  on_error) state=error ;;
+  on_session_end) state=clear ;;
+  on_tool_permission) kind=':kind=permission' ;;
+esac
+[ "$state" != unknown ] || exit 0
+
+# At most 400 Unicode characters (1600 UTF-8 bytes) keeps the decoded message
+# below 2048 bytes and the entire OSC below 4096. jq's base64 is single-line
+# on both macOS and Linux. Remove C0/C1 controls before encoding.
+encoded_message="$(jq -nr --arg message "$message" \
+  '$message | gsub("[\u0000-\u001f\u007f-\u009f]"; " ") | .[0:400] | @base64')" || exit 0
+printf '\033]7501;state=%s:app=rovo-dev:msg=%s%s\033\\' \
+  "$state" "$encoded_message" "$kind" >&3 2>/dev/null || true
+exit 0

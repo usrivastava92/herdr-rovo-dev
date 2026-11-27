@@ -14,6 +14,9 @@
 # in Rovo's config never rots.
 set -u
 
+# Desktop sessions must never fall back to a same-cwd TUI pane.
+[ "${HERDR_ROVO_TRANSPORT:-}" != "osc" ] || exit 0
+
 HB="${HERDR_BIN_PATH:-herdr}"
 
 root="$("$HB" plugin list --plugin rovo-dev.detector --json 2>/dev/null \

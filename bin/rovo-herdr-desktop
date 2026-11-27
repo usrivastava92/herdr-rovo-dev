@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Launch the current Rovo CLI with opt-in Herdr desktop status reporting.
+set -u
+
+for dependency in rovo jq; do
+  if ! command -v "$dependency" >/dev/null 2>&1; then
+    printf 'rovo-herdr-desktop: required command not found: %s\n' "$dependency" >&2
+    exit 127
+  fi
+done
+
+# Installed launchers retain the installer's config choice across new sessions.
+# A source checkout without a sidecar keeps Rovo's inherited config behavior.
+script_dir="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || exit 1
+config_sidecar="$script_dir/rovo-desktop-config.json"
+if [ -e "$config_sidecar" ] || [ -L "$config_sidecar" ]; then
+  if [ ! -f "$config_sidecar" ] || [ ! -r "$config_sidecar" ] \
+      || ! desktop_config="$(jq -jser '
+        if length == 1 and (.[0] | type == "object") then
+          .[0].config_file | select(type == "string" and startswith("/"))
+        else empty end | . + "."
+      ' "$config_sidecar" 2>/dev/null)"; then
+    printf 'rovo-herdr-desktop: invalid desktop config sidecar: %s (expected an absolute config_file string)\n' "$config_sidecar" >&2
+    exit 1
+  fi
+  # Strip the marker, not any trailing newlines belonging to the config path.
+  export ROVO_DEV_CONFIG_FILE="${desktop_config%.}"
+fi
+
+# ps reports the controlling terminal, even when stdin/stdout are redirected.
+# Never honor an inherited HERDR_ROVO_TTY override when launching a session.
+tty_name="$(ps -o tty= -p "$$" 2>/dev/null)" || tty_name=""
+tty_name="${tty_name//[[:space:]]/}"
+tty_path="/dev/${tty_name#/dev/}"
+export HERDR_ROVO_TRANSPORT=osc
+export HERDR_ROVO_TTY=""
+if [[ "$tty_path" =~ ^/dev/(tty[[:alnum:]]*|pts/[0-9]+)$ ]] && [ -c "$tty_path" ] \
+    && { exec 3>"$tty_path"; } 2>/dev/null && [ -t 3 ]; then
+  export HERDR_ROVO_TTY="$tty_path"
+else
+  printf '%s\n' 'rovo-herdr-desktop: no controlling terminal; desktop status is unavailable. Run this command in a terminal.' >&2
+fi
+
+clear_status() {
+  local status=$?
+  trap - EXIT
+  if [ -n "$HERDR_ROVO_TTY" ]; then
+    printf '\033]7501;state=clear:app=rovo-dev\033\\' >&3 2>/dev/null || true
+  fi
+  return "$status"
+}
+trap clear_status EXIT
+# Bash defers this trap until foreground Rovo returns. Do not replace Rovo's
+# actual status: it may handle Ctrl-C and continue before exiting normally.
+trap ':' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+if [ -n "$HERDR_ROVO_TTY" ]; then
+  printf '\033]7501;state=idle:app=rovo-dev\033\\' >&3 2>/dev/null || true
+fi
+
+# Keep Rovo in the foreground: a background job changes terminal input and
+# signal semantics. The EXIT trap preserves its status and clears the badge.
+# Signals sent only to this shell are deferred until foreground Rovo returns;
+# terminal signals target the process group and reach Rovo directly.
+rovo "$@" 3>&-
+exit "$?"

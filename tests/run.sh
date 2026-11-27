@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Run every tests/*.test.sh. Exits non-zero if any test file fails.
-# These tests use a fake `herdr` binary and never contact a real Herdr server.
+# Tests isolate config/state and never contact a real Herdr or Rovo instance.
 
 set -uo pipefail
 

@@ -8,6 +8,10 @@ A [Herdr](https://herdr.dev) plugin that detects [Rovo CLI and Rovo Dev CLI](htt
 
 Both CLIs are supported: the new **Rovo CLI** (`rovo`, state in `~/.rovo`) and the legacy **Rovo Dev CLI** (`acli rovodev run`, state in `~/.rovodev`).
 
+The new **Herdr desktop app** (`herdr-app` + `hc`) is supported through a
+standalone OSC 7501 bridge for the current `rovo` CLI. The existing Herdr TUI
+plugin, install commands, and legacy CLI support remain unchanged.
+
 ## Why
 
 Herdr can track terminal AI-agent sessions and show their live state (working, blocked, idle) in a single dashboard, but it has no built-in Rovo integration, so Rovo panes are invisible to the `agents` list. This plugin closes that gap: it spots panes running the Rovo CLI or Rovo Dev CLI, infers what the session is doing, and reports it back to Herdr, entirely through Herdr's public plugin and CLI APIs.
@@ -70,6 +74,77 @@ or not a run is in flight, so the `working`/`blocked` checks are evaluated first
 and take priority over the `idle` check.
 
 The current Rovo `agent mode:` (e.g. `plan`) is reported as the agent's custom status.
+
+## Herdr desktop
+
+Desktop support is separate from the TUI plugin manager. It uses Rovo hooks to
+send OSC 7501 status directly to the session's terminal; no custom sidebar mod
+or TUI `herdr` binary is required.
+
+### Setup
+
+Install `rovo`, `jq`, and **Mike Farah `yq` v4** first (on macOS:
+`brew install jq yq`). Run `rovo` once so `~/.rovo/config.yml` exists, then
+from a checkout of this repository:
+
+```sh
+bash bin/install-desktop
+```
+
+This installs standalone scripts under `~/.rovo/hooks/herdr-managed-desktop/`,
+adds eight lifecycle hooks, and registers **Rovo** in the desktop launch menu
+through `~/.config/herdr-app/programs.json`. Restart existing Rovo sessions
+after installation. No running desktop/core is needed during setup.
+
+Launch **Rovo from the desktop menu**, or run the installed wrapper in a
+desktop terminal:
+
+```sh
+~/.rovo/hooks/herdr-managed-desktop/rovo-herdr-desktop
+# All arguments are passed through unchanged:
+~/.rovo/hooks/herdr-managed-desktop/rovo-herdr-desktop --restore SESSION_ID
+```
+
+The wrapper is required for desktop status. It captures the controlling
+terminal before Rovo starts, so hook output still reaches `hc` when Rovo
+captures hook stdout. Typing plain `rovo` does not opt into desktop reporting.
+Hooks outside a wrapper-launched session do nothing on the desktop path.
+
+Desktop reports prompt/tool activity as `working`, permission requests as
+`blocked`, completion as `done`, and errors as `error`. Session end and wrapper
+exit clear the status so the remaining shell does not retain a Rovo badge.
+Normal terminal Ctrl+C and exit codes are preserved.
+
+### Configuration and removal
+
+- Config selection: `ROVO_DEV_CONFIG_FILE`, then `ROVO_USER_DIR/config.yml`,
+  then `~/.rovo/config.yml`. Desktop does not fall back to legacy `~/.rovodev`.
+  The installed launcher saves the selected absolute path in its sibling
+  `rovo-desktop-config.json` and exports it as `ROVO_DEV_CONFIG_FILE` on every
+  launch, even when the desktop has a different environment. Rerun installation
+  with the desired overrides to change this selection. A malformed saved config
+  fails explicitly rather than silently using Rovo's default.
+- App config: `HERDR_APP_HOME`, otherwise
+  `${XDG_CONFIG_HOME:-$HOME/.config}/herdr-app`.
+- Install/update: rerun `bash bin/install-desktop`. It preserves unrelated
+  Rovo hooks and program entries, plus custom Rovo display fields. An existing
+  conflicting `programs.rovo-dev.run` is rejected rather than overwritten.
+- Config rewrites create adjacent timestamped backups. YAML formatting and
+  comments are normalized; semantic fields are retained.
+- Remove desktop support with `bash bin/uninstall-desktop` from the checkout,
+  using the same config/app-home overrides used to install. It preserves TUI
+  hooks, unrelated files, and all program display fields (including `name` and
+  `match` values equal to installation defaults). Only the owned `run` command
+  is removed from `programs.json`; retained display-only entries do not appear
+  as launchable agents.
+
+Existing TUI installations need no migration. Desktop and TUI hooks coexist;
+the explicit desktop launcher prevents desktop events from being reported to
+a TUI pane, even when an old pane environment is inherited.
+
+Desktop supports macOS and Linux. Install the bridge on each machine where
+Rovo runs, including SSH hosts. Without a controlling terminal the wrapper
+warns and runs Rovo without desktop status. Native Windows is not supported.
 
 ## Install
 

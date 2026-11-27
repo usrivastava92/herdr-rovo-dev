@@ -29,6 +29,7 @@ command = [
   "bin/install-rovo-hooks",
   "bin/uninstall-rovo-hooks",
   "bin/herdr-lib.sh",
+  "bin/rovo-event.sh",
   "bin/check-deps",
 ]
 

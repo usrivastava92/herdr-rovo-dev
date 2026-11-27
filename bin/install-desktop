@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Install the standalone current-Rovo desktop bridge; never invoke Herdr's TUI.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: install-desktop [--help]
+Install standalone OSC hooks for the current rovo CLI and register Rovo in
+Herdr Desktop's programs.json. Requires Bash, jq and Mike Farah yq v4.
+Config: ROVO_DEV_CONFIG_FILE, else ROVO_USER_DIR/config.yml, else ~/.rovo/config.yml.
+Programs: ${HERDR_APP_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr-app}/programs.json.
+Existing conflicting Rovo run commands are an error, not overwritten.
+EOF
+}
+if [ "${1:-}" = --help ] && [ "$#" -eq 1 ]; then usage; exit 0; fi
+if [ "$#" -ne 0 ]; then usage >&2; exit 1; fi
+fail() { printf 'install-desktop: %s\n' "$*" >&2; exit 1; }
+command -v jq >/dev/null || fail 'jq is required'
+command -v yq >/dev/null || fail 'Mike Farah yq v4 is required'
+case "$(yq --version)" in *mikefarah*'version v4.'*) ;; *) fail 'Mike Farah yq v4 is required';; esac
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+config="${ROVO_DEV_CONFIG_FILE:-${ROVO_USER_DIR:-$HOME/.rovo}/config.yml}"
+[ -f "$config" ] && [ ! -L "$config" ] || fail "config must be a regular, non-symlink file: $config"
+config_dir="$(cd "$(dirname "$config")" && pwd -P)"
+config="$config_dir/$(basename "$config")"
+install_dir="$config_dir/hooks/herdr-managed-desktop"
+app_home="${HERDR_APP_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr-app}"
+[ ! -e "$app_home" ] || [ -d "$app_home" ] || fail "not a directory: $app_home"
+mkdir -p "$app_home"
+app_home="$(cd "$app_home" && pwd -P)"
+programs="$app_home/programs.json"
+[ ! -L "$programs" ] || fail "refusing symlink: $programs"
+[ ! -e "$programs" ] || [ -f "$programs" ] || fail "not a regular file: $programs"
+[ ! -L "$config_dir/hooks" ] && [ ! -L "$install_dir" ] || fail 'refusing symlinked hook directories'
+for file in rovo-herdr-desktop rovo-herdr-desktop-hook rovo-event.sh rovo-desktop-config.json; do
+  if [ "$file" != rovo-desktop-config.json ]; then
+    [ -f "$SCRIPT_DIR/$file" ] || fail "missing bundled file: $file"
+  fi
+  [ ! -L "$install_dir/$file" ] || fail "refusing symlink: $install_dir/$file"
+  [ ! -e "$install_dir/$file" ] || [ -f "$install_dir/$file" ] || fail "not a regular file: $install_dir/$file"
+done
+# POSIX single-quote escaping, including apostrophes in the config directory.
+quote_shell() { local value; value=${1//\'/\'\\\'\'}; printf "'%s'" "$value"; }
+hook_command="$(quote_shell "$install_dir/rovo-herdr-desktop-hook")"
+config_json="$(mktemp "$config_dir/.herdr-desktop-json.XXXXXX")"
+config_tmp="$(mktemp "$config_dir/.herdr-desktop-config.XXXXXX")"
+programs_tmp="$(mktemp "$app_home/.herdr-desktop-programs.XXXXXX")"
+sidecar_tmp=''
+trap 'rm -f "$config_json" "$config_tmp" "$programs_tmp"; [ -z "$sidecar_tmp" ] || rm -f "$sidecar_tmp"' EXIT
+# Reject malformed/multi-document YAML and unexpected shapes before touching originals.
+yq -o=json '.' "$config" | jq -s -e '
+  def valid_commands: . == null or (type == "array" and all(.[]; type == "object" and (.command == null or (.command | type == "string"))));
+  length == 1 and (.[0] | type == "object" and
+    (.eventHooks == null or (.eventHooks | type == "object")) and
+    (.eventHooks.events == null or (.eventHooks.events | type == "array" and
+      all(.[]; type == "object" and (.name | type == "string") and (.commands | valid_commands)))))
+' >/dev/null || fail 'invalid Rovo config or event hook structure'
+yq -o=json '.' "$config" > "$config_json"
+jq --arg cmd "$hook_command" '
+  .eventHooks //= {} | .eventHooks.events //= [] |
+  reduce ["on_session_start", "on_user_prompt", "on_tool_start", "on_tool_permission", "on_tool_end", "on_complete", "on_error", "on_session_end"][] as $event (. ;
+    if any(.eventHooks.events[]; .name == $event) then .
+    else .eventHooks.events += [{name: $event, commands: []}] end |
+    (.eventHooks.events[] | select(.name == $event) | .commands) |=
+      ((. // [] | map(select(.command != $cmd))) + [{command: $cmd}]))
+' "$config_json" | yq -P -p=json '.' > "$config_tmp"
+if [ -f "$programs" ]; then
+  jq -e -s 'length == 1 and (.[0] | type == "object" and (.programs == null or (.programs | type == "object")) and
+    (.programs["rovo-dev"] == null or (.programs["rovo-dev"] | type == "object")))' "$programs" >/dev/null || fail 'invalid programs.json structure'
+  jq -e --arg run "$install_dir/rovo-herdr-desktop" '
+    .programs["rovo-dev"].run == null or .programs["rovo-dev"].run == [$run]
+  ' "$programs" >/dev/null || fail 'programs.rovo-dev.run is already owned by another entry; leaving it unchanged'
+else
+  printf '{}\n' > "$programs_tmp"
+fi
+input="$programs"
+[ -f "$programs" ] || input="$programs_tmp"
+# jq reads the input before the output temporary is replaced (including first install).
+program_json="$(jq --arg run "$install_dir/rovo-herdr-desktop" '
+  .programs //= {} | .programs["rovo-dev"] //= {} |
+  .programs["rovo-dev"].name //= "Rovo" |
+  .programs["rovo-dev"].match //= ["rovo"] |
+  .programs["rovo-dev"].run = [$run]
+' "$input")"
+printf '%s\n' "$program_json" > "$programs_tmp"
+stamp="$(date +%Y%m%d%H%M%S).$$"
+cp -p "$config" "$config.before-herdr-desktop.$stamp"
+if [ -f "$programs" ]; then cp -p "$programs" "$programs.before-herdr-desktop.$stamp"; fi
+mkdir -p "$install_dir"
+# Bind the installed launcher to the selected config before publishing it.
+sidecar_tmp="$(mktemp "$install_dir/.rovo-desktop-config.XXXXXX")"
+jq -n --arg config "$config" '{config_file: $config}' > "$sidecar_tmp"
+mv -f "$sidecar_tmp" "$install_dir/rovo-desktop-config.json"
+for file in rovo-herdr-desktop rovo-herdr-desktop-hook rovo-event.sh; do
+  cp "$SCRIPT_DIR/$file" "$install_dir/$file"
+  chmod 755 "$install_dir/$file"
+done
+# Both generated documents are validated before either original is replaced.
+mv -f "$config_tmp" "$config"
+mv -f "$programs_tmp" "$programs"
+printf 'Installed desktop hooks in %s\nRegistered Rovo in %s\n' "$config" "$programs"

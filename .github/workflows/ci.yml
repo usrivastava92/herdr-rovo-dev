@@ -17,22 +17,21 @@ jobs:
 
       - name: Check shell syntax
         run: |
-          bash -n \
-            .github/scripts/set-version \
-            bin/check-deps \
-            bin/herdr-lib.sh \
-            bin/install-rovo-hooks \
-            bin/rovo-herdr-hook \
-            bin/rovo-herdr-hook-launcher \
-            bin/scan-rovo-panes \
-            bin/uninstall-rovo-hooks \
-            tests/run.sh \
-            tests/report-agent.test.sh
+          for script in .github/scripts/set-version bin/* tests/*.sh; do
+            bash -n "$script"
+          done
 
   tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install YAML test dependency
+        run: |
+          curl -fsSL https://github.com/mikefarah/yq/releases/download/v4.54.3/yq_linux_amd64 -o "$RUNNER_TEMP/yq"
+          echo "129534601871538efe0ba4c5e62a34fb1d5f469bcb975c4fddeb467d82974973  $RUNNER_TEMP/yq" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/yq"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
       - name: Run tests
         run: bash tests/run.sh

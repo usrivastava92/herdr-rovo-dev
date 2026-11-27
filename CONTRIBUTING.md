@@ -40,15 +40,31 @@ You can also run the scanner directly inside a Herdr pane:
 Before opening a PR, run a syntax check:
 
 ```sh
-bash -n bin/scan-rovo-panes bin/herdr-lib.sh bin/check-deps
+for script in bin/* tests/*.sh; do bash -n "$script"; done
 ```
 
-And run the tests. They drive the library functions against a fake `herdr`
-binary, so they need no real Herdr server:
+The tests require `jq`, Mike Farah `yq` v4, and `python3`. They use isolated
+config directories, a fake TUI backend, and real pseudo-terminals; no running
+Herdr server, desktop app, Rovo login, or user config is touched:
 
 ```sh
 bash tests/run.sh
 ```
+
+## Desktop development
+
+Desktop files are `bin/rovo-herdr-desktop` (opt-in launcher),
+`bin/rovo-herdr-desktop-hook` (OSC 7501 output), `bin/rovo-event.sh` (shared
+lifecycle parsing), and `bin/install-desktop` / `bin/uninstall-desktop`.
+Keep the existing TUI state mapping and plugin install interface compatible.
+Desktop uses `done` and `error` without changing the TUI's `idle` / `blocked`
+mapping for those same events.
+
+For manual verification, install into scratch `ROVO_USER_DIR` and
+`HERDR_APP_HOME` directories first. In a real desktop terminal, launch through
+the installed wrapper and exercise prompt, permission, resume, completion,
+error, Ctrl+C, and exit-to-shell. Check `hc get TERMINAL` and the desktop
+agents list. A passing pseudo-terminal test does not replace this UI check.
 
 ## Commit style
 

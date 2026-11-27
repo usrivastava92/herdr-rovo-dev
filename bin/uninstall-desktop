@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# Remove only this standalone desktop installation, leaving TUI hooks alone.
+set -euo pipefail
+usage() {
+  cat <<'EOF'
+Usage: uninstall-desktop [--help]
+Remove owned desktop hooks, standalone files, and the owned Rovo run command.
+Requires Bash, jq and Mike Farah yq v4. Missing config/programs files are safe.
+Config: ROVO_DEV_CONFIG_FILE, else ROVO_USER_DIR/config.yml, else ~/.rovo/config.yml.
+Programs: ${HERDR_APP_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr-app}/programs.json.
+All display fields and customized commands are preserved. Backups precede rewrites.
+EOF
+}
+if [ "${1:-}" = --help ] && [ "$#" -eq 1 ]; then usage; exit 0; fi
+if [ "$#" -ne 0 ]; then usage >&2; exit 1; fi
+fail() { printf 'uninstall-desktop: %s\n' "$*" >&2; exit 1; }
+command -v jq >/dev/null || fail 'jq is required'
+command -v yq >/dev/null || fail 'Mike Farah yq v4 is required'
+case "$(yq --version)" in *mikefarah*'version v4.'*) ;; *) fail 'Mike Farah yq v4 is required';; esac
+config="${ROVO_DEV_CONFIG_FILE:-${ROVO_USER_DIR:-$HOME/.rovo}/config.yml}"
+case "$config" in /*) ;; *) config="$PWD/$config";; esac
+config_dir="$(dirname "$config")"
+if [ -d "$config_dir" ]; then config_dir="$(cd "$config_dir" && pwd -P)"; fi
+config="$config_dir/$(basename "$config")"
+install_dir="$config_dir/hooks/herdr-managed-desktop"
+app_home="${HERDR_APP_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/herdr-app}"
+programs="$app_home/programs.json"
+for path in "$config" "$programs"; do
+  [ ! -L "$path" ] || fail "refusing symlink: $path"
+  [ ! -e "$path" ] || [ -f "$path" ] || fail "not a regular file: $path"
+done
+[ ! -L "$config_dir/hooks" ] && [ ! -L "$install_dir" ] || fail 'refusing symlinked hook directories'
+for file in rovo-herdr-desktop rovo-herdr-desktop-hook rovo-event.sh rovo-desktop-config.json; do
+  [ ! -L "$install_dir/$file" ] || fail "refusing symlink: $install_dir/$file"
+  [ ! -e "$install_dir/$file" ] || [ -f "$install_dir/$file" ] || fail "not a regular file: $install_dir/$file"
+done
+quote_shell() { local value; value=${1//\'/\'\\\'\'}; printf "'%s'" "$value"; }
+hook_command="$(quote_shell "$install_dir/rovo-herdr-desktop-hook")"
+config_tmp=''
+programs_tmp=''
+trap '[ -z "$config_tmp" ] || rm -f "$config_tmp"; [ -z "$programs_tmp" ] || rm -f "$programs_tmp"' EXIT
+if [ -f "$config" ]; then
+  yq -o=json '.' "$config" | jq -s -e '
+    def valid_commands: . == null or (type == "array" and all(.[]; type == "object" and (.command == null or (.command | type == "string"))));
+    length == 1 and (.[0] | type == "object" and
+      (.eventHooks == null or (.eventHooks | type == "object")) and
+      (.eventHooks.events == null or (.eventHooks.events | type == "array" and
+        all(.[]; type == "object" and (.name | type == "string") and (.commands | valid_commands)))))
+  ' >/dev/null || fail 'invalid Rovo config or event hook structure'
+  config_tmp="$(mktemp "$config_dir/.herdr-desktop-config.XXXXXX")"
+  yq -o=json '.' "$config" | jq --arg cmd "$hook_command" '
+    if .eventHooks.events == null then . else
+      (.eventHooks.events[] | select(.commands != null) | .commands) |= map(select(.command != $cmd))
+    end
+  ' | yq -P -p=json '.' > "$config_tmp"
+fi
+if [ -f "$programs" ]; then
+  jq -e -s 'length == 1 and (.[0] | type == "object" and (.programs == null or (.programs | type == "object")) and
+    (.programs["rovo-dev"] == null or (.programs["rovo-dev"] | type == "object")))' "$programs" >/dev/null || fail 'invalid programs.json structure'
+  programs_tmp="$(mktemp "$app_home/.herdr-desktop-programs.XXXXXX")"
+  jq --arg run "$install_dir/rovo-herdr-desktop" '
+    if .programs["rovo-dev"] == null then .
+    elif .programs["rovo-dev"].run != [$run] then .
+    else
+      del(.programs["rovo-dev"].run)
+    end
+  ' "$programs" > "$programs_tmp"
+fi
+stamp="$(date +%Y%m%d%H%M%S).$$"
+if [ -n "$config_tmp" ]; then
+  cp -p "$config" "$config.before-herdr-desktop-uninstall.$stamp"
+  mv -f "$config_tmp" "$config"
+fi
+if [ -n "$programs_tmp" ]; then
+  cp -p "$programs" "$programs.before-herdr-desktop-uninstall.$stamp"
+  mv -f "$programs_tmp" "$programs"
+fi
+for file in rovo-herdr-desktop rovo-herdr-desktop-hook rovo-event.sh rovo-desktop-config.json; do
+  rm -f "$install_dir/$file"
+done
+# An unowned extra file is deliberately left alone. Other rmdir errors are real.
+if [ -d "$install_dir" ]; then
+  shopt -s nullglob dotglob
+  entries=("$install_dir"/*)
+  if [ "${#entries[@]}" -eq 0 ]; then rmdir "$install_dir"; fi
+fi
+printf 'Removed owned desktop integration for %s\n' "$config"
