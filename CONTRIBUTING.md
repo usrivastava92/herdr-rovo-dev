@@ -98,6 +98,14 @@ Releases run unattended and use only the minted token, so there is no PAT fallba
 Keep the `production` environment free of required reviewers and wait timers so releases do not pause.
 Do not create release tags manually except when repairing a broken release.
 
+For an explicitly requested major milestone, use a
+`chore(major-release): ...` commit. This selects a major version without
+claiming an incompatible API change. Normal `fix:`, `feat:`, and breaking-change
+rules remain unchanged. Put curated notes in `docs/releases/X.Y.Z.md`; the
+release workflow appends that version's notes to its generated release notes
+when the file exists. Include compatibility, setup, fixes, and actual dependency
+changes; do not describe CI-only tools as runtime upgrades.
+
 ## State classification
 
 State heuristics live in `bin/herdr-lib.sh` (`classify_state`). They match Rovo

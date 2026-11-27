@@ -2,11 +2,19 @@ module.exports = {
   branches: ['main'],
   tagFormat: 'v${version}',
   plugins: [
-    '@semantic-release/commit-analyzer',
+    [
+      '@semantic-release/commit-analyzer',
+      {
+        releaseRules: [
+          { type: 'chore', scope: 'major-release', release: 'major' },
+        ],
+      },
+    ],
     '@semantic-release/release-notes-generator',
     [
       '@semantic-release/exec',
       {
+        generateNotesCmd: 'if [ -f "docs/releases/${nextRelease.version}.md" ]; then cat "docs/releases/${nextRelease.version}.md"; fi',
         prepareCmd: 'bash .github/scripts/set-version ${nextRelease.version}',
       },
     ],
